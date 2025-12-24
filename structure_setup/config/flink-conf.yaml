@@ -1,0 +1,16 @@
+blob.server.port: 6124
+taskmanager.memory.process.size: 4g
+metrics.scope.operator: <job_id>.<task_id>.<subtask_index>.<operator_name>
+metrics.reporter.kafka.topic: flink-caom-metrics
+jobmanager.rpc.address: jobmanager
+metrics.scope.task: <job_id>.<task_id>.<subtask_index>
+jobmanager.memory.process.size: 1600m
+jobmanager.rpc.port: 6123
+query.server.port: 6125
+metrics.scope.tm: <host>.<tm_id>.<tm_attempt_id>
+metrics.reporter.kafka.factory.class: org.apache.flink.metrics.kafka.KafkaMetricsReporter
+parallelism.default: 4
+taskmanager.numberOfTaskSlots: 10
+cluster.evenly-spread-out-slots: true
+metrics.reporter.kafka.brokers: kafka:9092
+metrics.reporter.kafka.interval: 5 SECONDS

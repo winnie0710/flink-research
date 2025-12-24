@@ -1,0 +1,25 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-annotations/target/flink-annotations-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-annotations/2.0.0/flink-annotations-2.0.0.jar
+===  UNCHANGED ANNOTATION: PUBLIC ABSTRACT org.apache.flink.annotation.Experimental  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+	+++  NEW ANNOTATION: java.lang.annotation.Retention
+		+++  NEW ELEMENT: value=java.lang.annotation.RetentionPolicy.RUNTIME (+)
+===  UNCHANGED ANNOTATION: PUBLIC ABSTRACT org.apache.flink.annotation.Internal  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+	+++  NEW ANNOTATION: java.lang.annotation.Retention
+		+++  NEW ELEMENT: value=java.lang.annotation.RetentionPolicy.RUNTIME (+)
+===  UNCHANGED ANNOTATION: PUBLIC ABSTRACT org.apache.flink.annotation.Public  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+	+++  NEW ANNOTATION: java.lang.annotation.Retention
+		+++  NEW ELEMENT: value=java.lang.annotation.RetentionPolicy.RUNTIME (+)
+===  UNCHANGED ANNOTATION: PUBLIC ABSTRACT org.apache.flink.annotation.PublicEvolving  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+	+++  NEW ANNOTATION: java.lang.annotation.Retention
+		+++  NEW ELEMENT: value=java.lang.annotation.RetentionPolicy.RUNTIME (+)
+***  MODIFIED ENUM: PUBLIC FINAL org.apache.flink.FlinkVersion  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW FIELD: PUBLIC(+) STATIC(+) FINAL(+) org.apache.flink.FlinkVersion v2_1
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

@@ -1,0 +1,160 @@
+services:
+  # --------------------
+  # 1. Kafka KRaft Mode (無 Zookeeper)
+  # --------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093" # 預留給外部連線使用 (如果需要)
+    environment:
+      # --- KRaft 必要設定 ---
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:9092,CONTROLLER://kafka:29093,EXTERNAL://0.0.0.0:9093'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT'
+      # --- 固定 Cluster ID (Base64)，避免每次重啟都是新叢集 ---
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+
+      # --- 一般 Kafka 設定 ---
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  # --------------------
+  # 2. Flink JobManager
+  # --------------------
+  jobmanager:
+    image: flink:1.19.0-java11  # 要改成 flink 1.19.0 的鎖定版本 完全避免浮動
+    hostname: jobmanager
+    container_name: jobmanager
+    ports:
+      - "8081:8081"
+      - "6123:6123"
+    command: jobmanager
+    volumes:
+      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./jobs/queries:/opt/nexmark/queries
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - FLINK_CLASSPATH=/opt/nexmark/*
+      - FLINK_PROPERTIES=jobmanager.memory.process.size:1600m
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+
+  # --------------------
+  # 3. TaskManagers
+  # --------------------
+
+  # TM A: 20 核心
+  tm-20c-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: tm-20c-1
+    container_name: tm-20c-1
+    command: taskmanager
+    volumes:
+      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+    depends_on:
+      - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+
+  # TM B: 20 核心 (模擬網路瓶頸)
+  tm-20c-2-net:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: tm-20c-2-net
+    container_name: tm-20c-2-net
+    command: taskmanager
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+    depends_on:
+      - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+
+  # TM C: 10 核心 (模擬 CPU 瓶頸)
+  tm-10c-3-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: tm-10c-3-cpu
+    container_name: tm-10c-3-cpu
+    command: taskmanager
+    volumes:
+      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+    depends_on:
+      - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+
+  # TM D: 20 核心
+  tm-20c-4:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: tm-20c-4
+    container_name: tm-20c-4
+    command: taskmanager
+    volumes:
+      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+    depends_on:
+      - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: '12'
+
+volumes:
+  kafka_data:

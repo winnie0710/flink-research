@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ScalaCompilerConfiguration">
+    <profile name="Maven 1" modules="flink-end-to-end-tests-scala,flink-examples-table_2.12,flink-table-api-scala-bridge_2.12,flink-table-api-scala_2.12,flink-table-planner_2.12,flink-tests">
+      <parameters>
+        <parameter value="-nobootcp" />
+      </parameters>
+    </profile>
+  </component>
+</project>

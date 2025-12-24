@@ -1,0 +1,29 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-connectors/flink-hadoop-compatibility/target/flink-hadoop-compatibility-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-hadoop-compatibility/2.0.0/flink-hadoop-compatibility-2.0.0.jar
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.hadoop.mapred.HadoopInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object, === V:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.hadoop.mapred.HadoopOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object, === V:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.hadoop.mapreduce.HadoopInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object, === V:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.hadoop.mapreduce.HadoopOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object, === V:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.WritableTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.hadoop.io.Writable
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.hadoopcompatibility.mapred.HadoopMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEYIN:java.lang.Object, === KEYOUT:java.lang.Object, === VALUEIN:java.lang.Object, === VALUEOUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.hadoopcompatibility.mapred.HadoopReducerWrappedFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEYIN:java.lang.Object, === KEYOUT:java.lang.Object, === VALUEIN:java.lang.Object, === VALUEOUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

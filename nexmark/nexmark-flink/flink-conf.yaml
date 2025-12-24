@@ -1,0 +1,9 @@
+# Flink Metrics (Prometheus Reporter)
+metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+metrics.reporter.prom.port: 9249
+# 由於您需要精確監控 Task，建議確保所有必要的標籤都被保留，例如 job_name
+metrics.reporter.prom.scope.variables.excludes:
+
+# 假設 TaskManager 使用 10 核心，並設定並行度
+taskmanager.memory.process.size: 2048m # 至少給 2G 記憶體
+taskmanager.numberOfTaskSlots: 4      # 根據 20-core 或 10-core 容器來設定 Task Slot 數量

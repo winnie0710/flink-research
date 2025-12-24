@@ -1,0 +1,656 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-core/target/flink-core-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-core/2.0.0/flink-core-2.0.0.jar
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.accumulators.Accumulator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === R:java.io.Serializable, === V:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.accumulators.AverageAccumulator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.accumulators.Histogram  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.accumulators.ListAccumulator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.accumulators.SimpleAccumulator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.io.Serializable
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.cache.DistributedCache  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.eventtime.AscendingTimestampsWatermarks  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.eventtime.BoundedOutOfOrdernessWatermarks  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.eventtime.IngestionTimeAssigner  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.eventtime.NoWatermarksGenerator  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.eventtime.RecordTimestampAssigner  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.eventtime.TimestampAssigner  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.eventtime.Watermark  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.eventtime.WatermarkGenerator  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.eventtime.WatermarkOutput  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.eventtime.WatermarkStrategy  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.eventtime.WatermarksWithIdleness  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.ExecutionConfig  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.AbstractRichFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.BroadcastVariableInitializer  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === O:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.CoGroupFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === O:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.CombineFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.CrossFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.FilterFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.FlatJoinFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.FlatMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === O:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.GroupCombineFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.GroupReduceFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === O:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.functions.InvalidTypesException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.IterationRuntimeContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.JoinFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.MapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === O:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.MapPartitionFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === O:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.OpenContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.Partitioner  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichCoGroupFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichCrossFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichFilterFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichFlatJoinFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichFlatMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichGroupCombineFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichGroupReduceFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichJoinFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichMapPartitionFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === I:java.lang.Object, === O:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RichReduceFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.RuntimeContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.InvalidProgramException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.BinaryInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.BinaryOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.io.BlockInfo  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.CleanupWhenUnsuccessful  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.DelimitedInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === OT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.FileInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === OT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.FileOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.FinalizeOnMaster  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT STATIC org.apache.flink.api.common.io.FinalizeOnMaster$FinalizationContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.GenericInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === OT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.InitializeOnMaster  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.InputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === OT:java.lang.Object, === T:org.apache.flink.core.io.InputSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.io.InputStreamFSInputWrapper  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.io.LocatableInputSplitAssigner  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.NonParallelInput  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.OutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT STATIC org.apache.flink.api.common.io.OutputFormat$InitializationContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.RichInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === OT:java.lang.Object, === T:org.apache.flink.core.io.InputSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.io.RichOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.io.SerializedInputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.core.io.IOReadableWritable
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.io.SerializedOutputFormat  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.core.io.IOReadableWritable
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.io.statistics.BaseStatistics  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.JobExecutionResult  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.JobID  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.JobSubmissionResult  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.NonSerializableUserCodeException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED ENUM: PUBLIC FINAL org.apache.flink.api.common.operators.Order  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.serialization.DeserializationSchema  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.serialization.SerializationSchema  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.serialization.TypeInformationSerializationSchema  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.state.CheckpointListener  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.AtomicType  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.common.typeinfo.BasicArrayTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === C:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.typeinfo.BasicTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.typeinfo.FractionalTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.typeinfo.IntegerTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.typeinfo.NothingTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.NumericTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.TypeHint  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED ANNOTATION: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.TypeInfo  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.TypeInfoFactory  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.typeinfo.TypeInformation  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.common.typeutils.CompositeType  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.Committer  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === CommT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT STATIC org.apache.flink.api.connector.sink2.Committer$CommitRequest  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === CommT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.CommitterInitContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.CommittingSinkWriter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === CommittableT:java.lang.Object, === InputT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.Sink  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === InputT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.SinkWriter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === InputT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT STATIC org.apache.flink.api.connector.sink2.SinkWriter$Context  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.StatefulSinkWriter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === InputT:java.lang.Object, === WriterStateT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.SupportsCommitter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === CommittableT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.SupportsWriterState  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === InputT:java.lang.Object, === WriterStateT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.sink2.WriterInitContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED ENUM: PUBLIC FINAL org.apache.flink.api.connector.source.Boundedness  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.connector.source.lib.NumberSequenceSource  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.connector.source.lib.util.IteratorSourceEnumerator  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === SplitT:org.apache.flink.api.connector.source.lib.util.IteratorSourceSplit<?,?><?,?>
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.connector.source.lib.util.IteratorSourceReader  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Object, === IterT:java.util.Iterator<E><E>, === SplitT:org.apache.flink.api.connector.source.lib.util.IteratorSourceSplit<E,IterT><E,IterT>
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.connector.source.lib.util.IteratorSourceReaderBase  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Object, === IterT:java.util.Iterator<E><E>, === O:java.lang.Object, === SplitT:org.apache.flink.api.connector.source.lib.util.IteratorSourceSplit<E,IterT><E,IterT>
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.lib.util.IteratorSourceSplit  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Object, === IterT:java.util.Iterator<E><E>
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.connector.source.ReaderInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.ReaderOutput  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.Source  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === EnumChkT:java.lang.Object, === SplitT:org.apache.flink.api.connector.source.SourceSplit, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceEvent  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceOutput  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceReader  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === SplitT:org.apache.flink.api.connector.source.SourceSplit, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceReaderContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceReaderFactory  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === SplitT:org.apache.flink.api.connector.source.SourceSplit, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SourceSplit  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SplitEnumerator  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === CheckpointT:java.lang.Object, === SplitT:org.apache.flink.api.connector.source.SourceSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.connector.source.SplitEnumeratorContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === SplitT:org.apache.flink.api.connector.source.SourceSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.connector.source.SplitsAssignment  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === SplitT:org.apache.flink.api.connector.source.SourceSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.EitherTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === L:java.lang.Object, === R:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.EnumTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Enum<T><T>
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.GenericTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.java.typeutils.InputTypeConfigurable  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.ObjectArrayTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === C:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.PojoTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.java.typeutils.ResultTypeQueryable  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.api.java.typeutils.TupleTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.api.java.tuple.Tuple
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.TypeExtractor  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.typeutils.ValueTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.types.Value
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+***  MODIFIED CLASS: PUBLIC FINAL org.apache.flink.configuration.ConfigConstants  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW FIELD: PUBLIC(+) STATIC(+) FINAL(+) java.lang.String EVENTS_REPORTER_PREFIX
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.configuration.Configuration  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.configuration.UnmodifiableConfiguration  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED ENUM: PUBLIC FINAL org.apache.flink.core.execution.CheckpointingMode  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.fs.BlockLocation  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.core.fs.FileInputSplit  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.fs.FileStatus  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.core.fs.FileSystem  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.core.fs.FSDataInputStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.core.fs.FSDataOutputStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.fs.LocatedFileStatus  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.core.fs.Path  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.core.io.GenericInputSplit  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.io.InputSplit  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.io.InputSplitSource  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.core.io.InputSplit
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.io.IOReadableWritable  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.core.io.LocatableInputSplit  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.memory.DataInputView  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.core.memory.DataOutputView  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.BooleanValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.ByteValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.CharValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.types.CopyableValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.DeserializationException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.DoubleValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.types.Either  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === L:java.lang.Object, === R:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.FloatValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.IntValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.KeyFieldOutOfBoundsException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.types.ListValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === V:org.apache.flink.types.Value
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.LongValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.types.MapValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:org.apache.flink.types.Value, === V:org.apache.flink.types.Value
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.types.NormalizableKey  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.Nothing  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.NullKeyFieldException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.types.NullValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.types.Record  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.types.ResettableValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:org.apache.flink.types.Value
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.ShortValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.StringValue  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.types.Value  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.util.AbstractParameterTool  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.Collector  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.DynamicCodeLoadingException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.FlinkException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.FlinkRuntimeException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.LongValueSequenceIterator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.NumberSequenceIterator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.ParameterTool  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.util.SplittableIterator  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC FINAL org.apache.flink.util.TemporaryClassLoaderContext  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.TraversableOnceException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.util.XORShiftRandom  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

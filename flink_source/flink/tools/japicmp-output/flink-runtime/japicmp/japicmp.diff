@@ -1,0 +1,104 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-runtime/target/flink-runtime-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-runtime/2.0.0/flink-runtime-2.0.0.jar
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.runtime.jobgraph.tasks.InputSplitProvider  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.runtime.state.VoidNamespaceTypeInfo  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.streaming.api.checkpoint.CheckpointedFunction  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.AllWindowedStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.CoGroupedStreams  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T1:java.lang.Object, === T2:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.CoGroupedStreams$Where  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEY:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.CoGroupedStreams$Where$EqualTo  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC STATIC org.apache.flink.streaming.api.datastream.CoGroupedStreams$WithWindow  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEY:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.ConnectedStreams  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.DataStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.DataStreamSink  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.DataStreamSource  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.JoinedStreams  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T1:java.lang.Object, === T2:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.JoinedStreams$Where  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEY:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.JoinedStreams$Where$EqualTo  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC STATIC org.apache.flink.streaming.api.datastream.JoinedStreams$WithWindow  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEY:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.KeyedStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === KEY:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.SideOutputDataStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.datastream.WindowedStream  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === K:java.lang.Object, === T:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.environment.CheckpointConfig  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.environment.LocalStreamEnvironment  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.environment.RemoteStreamEnvironment  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.streaming.api.environment.StreamExecutionEnvironment  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.streaming.api.functions.co.CoFlatMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.streaming.api.functions.co.CoMapFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN1:java.lang.Object, === IN2:java.lang.Object, === OUT:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.streaming.api.functions.windowing.AllWindowFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === OUT:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.streaming.api.functions.windowing.WindowFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === KEY:java.lang.Object, === OUT:java.lang.Object, === W:org.apache.flink.streaming.api.windowing.windows.Window
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

@@ -1,0 +1,59 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-metrics/flink-metrics-core/target/flink-metrics-core-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-metrics-core/2.0.0/flink-metrics-core-2.0.0.jar
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.CharacterFilter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.Counter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.Gauge  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.Histogram  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.metrics.HistogramStatistics  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.LogicalScopeProvider  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.Meter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.Metric  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.metrics.MetricConfig  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.MetricGroup  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED ENUM: PUBLIC FINAL org.apache.flink.metrics.MetricType  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
++++  NEW INTERFACE: PUBLIC(+) ABSTRACT(+) org.apache.flink.metrics.Reporter  (not serializable)
+	+++  CLASS FILE FORMAT VERSION: 61.0 <- n.a.
+	+++  NEW SUPERCLASS: java.lang.Object
+	+++  NEW METHOD: PUBLIC(+) ABSTRACT(+) void close()
+	+++  NEW METHOD: PUBLIC(+) ABSTRACT(+) void open(org.apache.flink.metrics.MetricConfig)
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.metrics.reporter.AbstractReporter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+***  MODIFIED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.reporter.MetricReporter  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW INTERFACE: org.apache.flink.metrics.Reporter
+	---  REMOVED METHOD: PUBLIC(-) ABSTRACT(-) void close()
+	---  REMOVED METHOD: PUBLIC(-) ABSTRACT(-) void open(org.apache.flink.metrics.MetricConfig)
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.reporter.MetricReporterFactory  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.reporter.Scheduled  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.metrics.View  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

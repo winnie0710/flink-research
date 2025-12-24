@@ -1,0 +1,59 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+#==============================================================================
+# Flink & Web Frontend
+#==============================================================================
+
+# Flink REST 地址指向 JobManager 服務名稱
+# docker 應該要用 jobmanager ？ 打包jar時先用localhost，runtime時再覆蓋
+flink.rest.address: localhost
+flink.rest.port: 8081
+
+# Nexmark 應用程式必須知道要使用哪個 Workload Suite
+#nexmark.workload.suite: 100m
+
+# Metric Reporter (Nexmark 內部使用的，與 Kafka Reporter 無關)
+nexmark.metric.reporter.host: localhost
+nexmark.metric.reporter.port: 9098
+
+#==============================================================================
+# Workload Suite Definition (100m)
+#==============================================================================
+
+nexmark.workload.suite.100m.events.num: 100000000
+nexmark.workload.suite.100m.tps: 10000000
+nexmark.workload.suite.100m.queries: "q0,q1,q2,q3,q4,q5,q7,q8,q9,q10,q11,q12,q13,q14,q15,q16,q17,q18,q19,q20,q21,q22"
+nexmark.workload.suite.100m.queries.cep: "q0,q1,q2,q3"
+nexmark.workload.suite.100m.warmup.duration: 120s
+nexmark.workload.suite.100m.warmup.events.num: 100000000
+nexmark.workload.suite.100m.warmup.tps: 10000000
+
+#==============================================================================
+# Workload for data generation
+#==============================================================================
+
+nexmark.workload.suite.datagen.tps: 10000000
+nexmark.workload.suite.datagen.queries: "insert_kafka"
+nexmark.workload.suite.datagen.queries.cep: "insert_kafka"
+
+#==============================================================================
+# Kafka config
+#==============================================================================
+
+# Kafka Bootstrap Servers 指向 Docker 服務名稱
+# kafka.bootstrap.servers: kafka:9092

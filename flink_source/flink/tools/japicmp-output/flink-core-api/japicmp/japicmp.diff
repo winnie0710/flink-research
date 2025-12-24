@@ -1,0 +1,247 @@
+Comparing source compatibility of /home/yenwei/caom/flink/flink-core-api/target/flink-core-api-2.1.0.jar against /home/yenwei/.m2/repository/org/apache/flink/flink-core-api/2.0.0/flink-core-api-2.0.0.jar
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.Function  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.common.functions.ReduceFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.api.java.functions.KeySelector  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === IN:java.lang.Object, === KEY:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple0Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple10Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple11Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple12Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple13Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple14Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple15Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple16Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple17Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple18Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple19Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple1Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple20Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple21Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple22Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple23Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple24Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T23:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple25Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T23:java.lang.Object, === T24:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple2Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple3Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple4Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple5Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple6Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple7Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple8Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.builder.Tuple9Builder  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC ABSTRACT org.apache.flink.api.java.tuple.Tuple  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple0  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple1  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple10  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple11  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple12  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple13  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple14  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple15  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple16  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple17  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple18  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple19  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple2  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple20  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple21  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple22  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple23  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple24  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T23:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple25  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T10:java.lang.Object, === T11:java.lang.Object, === T12:java.lang.Object, === T13:java.lang.Object, === T14:java.lang.Object, === T15:java.lang.Object, === T16:java.lang.Object, === T17:java.lang.Object, === T18:java.lang.Object, === T19:java.lang.Object, === T2:java.lang.Object, === T20:java.lang.Object, === T21:java.lang.Object, === T22:java.lang.Object, === T23:java.lang.Object, === T24:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object, === T9:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple3  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple4  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple5  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple6  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple7  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple8  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.api.java.tuple.Tuple9  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === T0:java.lang.Object, === T1:java.lang.Object, === T2:java.lang.Object, === T3:java.lang.Object, === T4:java.lang.Object, === T5:java.lang.Object, === T6:java.lang.Object, === T7:java.lang.Object, === T8:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED CLASS: PUBLIC org.apache.flink.types.NullFieldException  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.FunctionWithException  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Throwable, === R:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.LongFunctionWithException  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Throwable, === R:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.RunnableWithException  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.SerializableFunction  (compatible)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === R:java.lang.Object, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.SupplierWithException  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Throwable, === R:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public
+===  UNCHANGED INTERFACE: PUBLIC ABSTRACT org.apache.flink.util.function.ThrowingConsumer  (not serializable)
+	***! CLASS FILE FORMAT VERSION: 61.0 <- 55.0
+	GENERIC TEMPLATES: === E:java.lang.Throwable, === T:java.lang.Object
+	+++  NEW ANNOTATION: org.apache.flink.annotation.Public

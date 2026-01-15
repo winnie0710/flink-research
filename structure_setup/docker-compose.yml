@@ -28,6 +28,11 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # --- [新增] 防止硬碟爆滿的自動清理設定 ---
+      KAFKA_LOG_RETENTION_BYTES: 1073741824     # 限制單一 Partition 最大 1GB
+      KAFKA_LOG_RETENTION_HOURS: 1              # 限制時間 1 小時
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 180000 # 每 3 分鐘檢查一次
+      KAFKA_LOG_SEGMENT_BYTES: 268435456        # Segment 切小一點方便清理
     volumes:
       - kafka_data:/var/lib/kafka/data
 
@@ -41,6 +46,7 @@ services:
     ports:
       - "8081:8081"
       - "6123:6123"
+      - "9249:9249"
     command: jobmanager
     volumes:
       - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
@@ -49,6 +55,9 @@ services:
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
       - ./jobs/queries:/opt/nexmark/queries
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist_2.12-1.19.0.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - FLINK_CLASSPATH=/opt/nexmark/*
@@ -56,13 +65,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '12'
+          cpus: '1'
 
   # --------------------
   # 3. TaskManagers
   # --------------------
 
-  # TM A: 20 核心
+  # TM A: 2 核心
   tm-20c-1:
     build:
       context: .
@@ -72,20 +81,24 @@ services:
     command: taskmanager
     volumes:
       - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist_2.12-1.19.0.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '12'
+          cpus: '1.5'
 
-  # TM B: 20 核心 (模擬網路瓶頸)
+  # TM B: 2 核心 (模擬網路瓶頸)
   tm-20c-2-net:
     build:
       context: .
@@ -97,20 +110,24 @@ services:
       - NET_ADMIN
     volumes:
       - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist_2.12-1.19.0.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '12'
+          cpus: '1.5'
 
-  # TM C: 10 核心 (模擬 CPU 瓶頸)
+  # TM C: 1 核心 (模擬 CPU 瓶頸)
   tm-10c-3-cpu:
     build:
       context: .
@@ -120,20 +137,24 @@ services:
     command: taskmanager
     volumes:
       - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist_2.12-1.19.0.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '8'
+          cpus: '1'
 
-  # TM D: 20 核心
+  # TM D: 1 核心
   tm-20c-4:
     build:
       context: .
@@ -143,18 +164,58 @@ services:
     command: taskmanager
     volumes:
       - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist_2.12-1.19.0.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=10
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '12'
+          cpus: '1'
+
+  # --------------------
+  # 4. Monitoring (Prometheus + Grafana)
+  # --------------------
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090" # Prometheus UI
+    volumes:
+      # 將本地的設定檔掛載進去 (請確保您在本地 config 資料夾下有建立此檔案)
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - /home/yenwei/server_data/prometheus:/prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5' # 限制資源避免當機
+          memory: 1G
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000" # Grafana UI
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # 預設密碼
+      - GF_AUTH_ANONYMOUS_ENABLED=true # 允許匿名登入 (方便測試用)
+    volumes:
+      - /home/yenwei/server_data/grafana:/var/lib/grafana
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
 
 volumes:
   kafka_data:

@@ -4,7 +4,7 @@ blob:
 taskmanager:
   memory:
     process:
-      size: 1728m
+      size: 4g
   bind-host: 0.0.0.0
   numberOfTaskSlots: 10
 jobmanager:

@@ -1,0 +1,15 @@
+global:
+  scrape_interval: 5s      # 每 5 秒抓取一次數據
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: 'flink-cluster'
+    static_configs:
+      - targets:
+          # 這裡必須對應 docker-compose 中的 hostname 與 flink-conf 設定的 port (9249)
+          - 'jobmanager:9249'
+          - 'tm-20c-1:9249'
+          - 'tm-20c-2-net:9249'
+          - 'tm-10c-3-cpu:9249'
+          - 'tm-20c-4:9249'
+    metrics_path: /metrics

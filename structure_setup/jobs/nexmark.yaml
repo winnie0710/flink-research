@@ -25,7 +25,9 @@ flink.rest.address: jobmanager
 flink.rest.port: 8081
 
 # Nexmark 應用程式必須知道要使用哪個 Workload Suite 100m，或是 datagen
-nexmark.workload.suite: datagen
+# 產生資料 job - datagen
+# 執行q7 - 100m   (是設定上限嗎？
+nexmark.workload.suite: 100m
 
 # Metric Reporter (Nexmark 內部使用的，與 Kafka Reporter 無關)
 nexmark.metric.reporter.host: jobmanager
@@ -35,13 +37,15 @@ nexmark.metric.reporter.port: 9098
 # Workload Suite Definition (100m)
 #==============================================================================
 
-nexmark.workload.suite.100m.events.num: 5000000000
-nexmark.workload.suite.100m.tps: 10000000
+# nexmark.workload.suite.100m.events.num: 5000000
+# 不能同時設數量和時間 先以時間為主，insert_kafka只能使用數據量 num
+nexmark.metric.monitor.duration: 3600s
+# nexmark.workload.suite.100m.tps: 50000
 # 包含 q7 的查詢列表
 nexmark.workload.suite.100m.queries: "q0,q1,q2,q3,q4,q5,q7,q8,q9,q10,q11,q12,q13,q14,q15,q16,q17,q18,q19,q20,q21,q22"
-nexmark.workload.suite.100m.warmup.duration: 120s
+nexmark.workload.suite.100m.warmup.duration: 60s
 nexmark.workload.suite.100m.warmup.events.num: 100000000
-nexmark.workload.suite.100m.warmup.tps: 10000000
+nexmark.workload.suite.100m.warmup.tps: 50000
 
 
 #==============================================================================
@@ -49,9 +53,9 @@ nexmark.workload.suite.100m.warmup.tps: 10000000
 # 提交 insert.sql job 來產生數據
 #==============================================================================
 
-nexmark.workload.suite.datagen.tps: 10000000
-nexmark.workload.suite.datagen.queries: "insert_kafka"
-nexmark.workload.suite.datagen.queries.cep: "insert_kafka"
+nexmark.workload.suite.datagen.tps: 50000
+nexmark.workload.suite.datagen.queries: "generate_dataset"
+nexmark.workload.suite.datagen.queries.cep: "generate_dataset"
 nexmark.workload.suite.datagen.events.num: 500000000
 
 #==============================================================================
@@ -60,3 +64,10 @@ nexmark.workload.suite.datagen.events.num: 500000000
 
 # Kafka Bootstrap Servers 指向 Docker 服務名稱
 kafka.bootstrap.servers: kafka:9092
+
+# ==============================================================================
+# Kafka Topic Configuration
+# ==============================================================================
+nexmark.person.topic: nexmark-events
+nexmark.auction.topic: nexmark-events
+nexmark.bid.topic: nexmark-events

@@ -32,6 +32,7 @@ import org.apache.flink.runtime.concurrent.ComponentMainThreadExecutor;
 import org.apache.flink.runtime.execution.ExecutionState;
 import org.apache.flink.runtime.executiongraph.Execution;
 import org.apache.flink.runtime.executiongraph.ExecutionJobVertex;
+import org.apache.flink.runtime.jobmaster.MigrationPlanReader;
 import org.apache.flink.runtime.executiongraph.IOMetrics;
 import org.apache.flink.runtime.executiongraph.JobStatusListener;
 import org.apache.flink.runtime.executiongraph.failover.ExecutionFailureHandler;
@@ -109,6 +110,12 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
     protected final ExecutionDeployer executionDeployer;
 
+    /** Reader for migration plan that maps subtask IDs to target IPs. */
+    private final MigrationPlanReader migrationPlanReader;
+
+    /** Migration plan mapping subtask IDs to target IPs. */
+    private final Map<String, String> migrationPlan;
+
     protected DefaultScheduler(
             final Logger log,
             final JobGraph jobGraph,
@@ -161,6 +168,12 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
         this.reservedAllocationRefCounters = new HashMap<>();
         this.reservedAllocationByExecutionVertex = new HashMap<>();
+
+        // Initialize migration plan reader and load migration plan
+        this.migrationPlanReader = new MigrationPlanReader();
+        this.migrationPlan = migrationPlanReader.readMigrationPlan();
+        log.info("Loaded migration plan with {} entries for job {}", 
+                migrationPlan.size(), jobGraph.getJobID());
 
         final FailoverStrategy failoverStrategy =
                 failoverStrategyFactory.create(
@@ -509,7 +522,40 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
         @Override
         public ResourceProfile getResourceProfile(final ExecutionVertexID executionVertexId) {
-            return getExecutionVertex(executionVertexId).getResourceProfile();
+            ResourceProfile baseProfile = getExecutionVertex(executionVertexId).getResourceProfile();
+
+            // Check if there's a preferred IP for this execution vertex
+            Optional<String> preferredIp = getPreferredIp(executionVertexId);
+
+            if (preferredIp.isPresent()) {
+                // Create a new ResourceProfile with the preferred IP
+                return ResourceProfile.newBuilder(baseProfile)
+                        .setPreferredIp(preferredIp)
+                        .build();
+            }
+
+            return baseProfile;
+        }
+
+        @Override
+        public Optional<String> getPreferredIp(final ExecutionVertexID executionVertexId) {
+            // Generate subtask ID in the format: "jobVertexName_subtaskIndex"
+            String jobVertexName = getExecutionVertex(executionVertexId)
+                    .getJobVertex()
+                    .getName();
+            int subtaskIndex = executionVertexId.getSubtaskIndex();
+            String subtaskId = jobVertexName + "_" + subtaskIndex;
+
+            Optional<String> preferredIp = MigrationPlanReader.getTargetIp(subtaskId, migrationPlan);
+
+            if (preferredIp.isPresent()) {
+                log.info("Requesting Slot for {} with Preferred IP: {}", 
+                        subtaskId, preferredIp.get());
+            } else {
+                log.debug("No preferred IP found for subtask: {}", subtaskId);
+            }
+
+            return preferredIp;
         }
 
         @Override

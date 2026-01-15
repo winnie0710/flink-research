@@ -96,8 +96,7 @@ public class MetricReporter {
 			String metricName = flinkRestClient.getTpsMetricName(jobId, vertexId);
 			return Tuple2.of(vertexId, metricName);
 		} catch (Exception e) {
-			// 有出現這個錯誤
-            LOG.warn("Job metric is not ready yet.", e);   //!!!
+            LOG.warn("Job metric is not ready yet.", e);
 			return null;
 		}
 	}
@@ -157,7 +156,8 @@ public class MetricReporter {
 		long startTime = System.currentTimeMillis();
 		waitFor(monitorDelay);
 		if (eventsNum == 0) {
-			System.out.printf("Start to monitor metrics for %s seconds.%n", monitorDuration.getSeconds());
+			// 設定執行時間而非執行資料量
+            System.out.printf("Start to monitor metrics for %s seconds.%n", monitorDuration.getSeconds());
 		} else {
 			System.out.println("Start to monitor metrics until job is finished.");
 		}
@@ -167,6 +167,10 @@ public class MetricReporter {
 		waitForOrJobFinish(monitorDuration);
 
 		long endTime = System.currentTimeMillis();
+        // [新增] 在關閉資源前，先檢查是否有殘留的錯誤沒有被拋出
+        if (error != null) {
+            throw new RuntimeException("Error during metric collection", error);
+        }
 
 		// cleanup the resource
 		this.close();
@@ -240,7 +244,7 @@ public class MetricReporter {
 				BenchmarkMetric metric = new BenchmarkMetric(tps.getSum(), cpu);
 				// it's thread-safe to update metrics
 				metrics.add(metric);
-				// logging
+				// 執行結束才會輸出throughput 要有所提升 遷移中間必須暫停很短的時間，否則會拉低 throughput
 				String message = eventsNum == 0 ?
 						String.format("Current Throughput=%s, Cores=%s (%s TMs)",
 								metric.getPrettyTps(), metric.getPrettyCpu(), tms) :

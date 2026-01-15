@@ -98,16 +98,31 @@ class MergingSharedSlotProfileRetrieverFactory
                 ResourceProfile physicalSlotResourceProfile) {
             Collection<AllocationID> priorAllocations = new HashSet<>();
             Collection<TaskManagerLocation> preferredLocations = new ArrayList<>();
+            Optional<String> preferredIp = Optional.empty();
+
             for (ExecutionVertexID execution : executionSlotSharingGroup.getExecutionVertexIds()) {
                 priorAllocationIdRetriever.apply(execution).ifPresent(priorAllocations::add);
                 preferredLocations.addAll(
                         preferredLocationsRetriever.getPreferredLocations(
                                 execution, producersToIgnore));
+
+                // Extract preferredIp from the first execution vertex that has one
+                // In slot sharing, we use the first available preferred IP
+                if (!preferredIp.isPresent() && physicalSlotResourceProfile.getPreferredIp().isPresent()) {
+                    preferredIp = physicalSlotResourceProfile.getPreferredIp();
+                }
             }
 
+            // Create a new ResourceProfile with the preferred IP if available
+            ResourceProfile profileWithIp = preferredIp.isPresent()
+                    ? ResourceProfile.newBuilder(physicalSlotResourceProfile)
+                            .setPreferredIp(preferredIp)
+                            .build()
+                    : physicalSlotResourceProfile;
+
             return SlotProfile.priorAllocation(
-                    physicalSlotResourceProfile,
-                    physicalSlotResourceProfile,
+                    profileWithIp,
+                    profileWithIp,
                     preferredLocations,
                     priorAllocations,
                     reservedAllocationIds);

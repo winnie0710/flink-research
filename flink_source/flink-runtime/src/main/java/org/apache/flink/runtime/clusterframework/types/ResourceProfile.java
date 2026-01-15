@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -117,6 +118,9 @@ public class ResourceProfile implements Serializable {
     /** A extensible field for user specified resources from {@link ResourceSpec}. */
     private final Map<String, ExternalResource> extendedResources;
 
+    /** Preferred IP address for slot allocation. Used for migration and placement control. */
+    private final Optional<String> preferredIp;
+
     // ------------------------------------------------------------------------
 
     /**
@@ -128,6 +132,7 @@ public class ResourceProfile implements Serializable {
      * @param managedMemory The size of the managed memory.
      * @param networkMemory The size of the network memory.
      * @param extendedResources The extended resources such as GPU and FPGA
+     * @param preferredIp The preferred IP address for slot allocation
      */
     private ResourceProfile(
             final CPUResource cpuCores,
@@ -135,7 +140,8 @@ public class ResourceProfile implements Serializable {
             final MemorySize taskOffHeapMemory,
             final MemorySize managedMemory,
             final MemorySize networkMemory,
-            final Map<String, ExternalResource> extendedResources) {
+            final Map<String, ExternalResource> extendedResources,
+            final Optional<String> preferredIp) {
 
         checkNotNull(cpuCores);
 
@@ -149,6 +155,7 @@ public class ResourceProfile implements Serializable {
                 checkNotNull(extendedResources).entrySet().stream()
                         .filter(entry -> !checkNotNull(entry.getValue()).isZero())
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        this.preferredIp = checkNotNull(preferredIp);
     }
 
     /**
@@ -161,6 +168,7 @@ public class ResourceProfile implements Serializable {
         this.managedMemory = null;
         this.networkMemory = null;
         this.extendedResources = new HashMap<>();
+        this.preferredIp = Optional.empty();
     }
 
     // ------------------------------------------------------------------------
@@ -243,6 +251,15 @@ public class ResourceProfile implements Serializable {
     public Map<String, ExternalResource> getExtendedResources() {
         throwUnsupportedOperationExceptionIfUnknown();
         return Collections.unmodifiableMap(extendedResources);
+    }
+
+    /**
+     * Get the preferred IP address for slot allocation.
+     *
+     * @return The preferred IP address, or empty if not specified
+     */
+    public Optional<String> getPreferredIp() {
+        return preferredIp;
     }
 
     private void throwUnsupportedOperationExceptionIfUnknown() {
@@ -347,6 +364,7 @@ public class ResourceProfile implements Serializable {
         result = 31 * result + Objects.hashCode(managedMemory);
         result = 31 * result + Objects.hashCode(networkMemory);
         result = 31 * result + extendedResources.hashCode();
+        result = 31 * result + preferredIp.hashCode();
         return result;
     }
 
@@ -361,7 +379,8 @@ public class ResourceProfile implements Serializable {
                     && Objects.equals(taskOffHeapMemory, that.taskOffHeapMemory)
                     && Objects.equals(managedMemory, that.managedMemory)
                     && Objects.equals(networkMemory, that.networkMemory)
-                    && Objects.equals(extendedResources, that.extendedResources);
+                    && Objects.equals(extendedResources, that.extendedResources)
+                    && Objects.equals(preferredIp, that.preferredIp);
         }
         return false;
     }
@@ -394,13 +413,19 @@ public class ResourceProfile implements Serializable {
                                     oldResource == null ? resource : oldResource.merge(resource));
                 });
 
+        // Prefer this profile's IP if present, otherwise use other's IP
+        Optional<String> mergedPreferredIp = this.preferredIp.isPresent()
+                ? this.preferredIp
+                : other.preferredIp;
+
         return new ResourceProfile(
                 cpuCores.merge(other.cpuCores),
                 taskHeapMemory.add(other.taskHeapMemory),
                 taskOffHeapMemory.add(other.taskOffHeapMemory),
                 managedMemory.add(other.managedMemory),
                 networkMemory.add(other.networkMemory),
-                resultExtendedResource);
+                resultExtendedResource,
+                mergedPreferredIp);
     }
 
     /**
@@ -437,7 +462,8 @@ public class ResourceProfile implements Serializable {
                 taskOffHeapMemory.subtract(other.taskOffHeapMemory),
                 managedMemory.subtract(other.managedMemory),
                 networkMemory.subtract(other.networkMemory),
-                resultExtendedResource);
+                resultExtendedResource,
+                this.preferredIp);
     }
 
     @Nonnull
@@ -470,7 +496,8 @@ public class ResourceProfile implements Serializable {
                 taskOffHeapMemory.multiply(multiplier),
                 managedMemory.multiply(multiplier),
                 networkMemory.multiply(multiplier),
-                resultExtendedResource);
+                resultExtendedResource,
+                this.preferredIp);
     }
 
     @Override
@@ -490,6 +517,7 @@ public class ResourceProfile implements Serializable {
                         : (", "
                                 + ExternalResourceUtils.generateExternalResourcesString(
                                         extendedResources.values())))
+                + (preferredIp.isPresent() ? ", preferredIp=" + preferredIp.get() : "")
                 + '}';
     }
 
@@ -574,7 +602,8 @@ public class ResourceProfile implements Serializable {
                 .setTaskOffHeapMemory(resourceProfile.taskOffHeapMemory)
                 .setManagedMemory(resourceProfile.managedMemory)
                 .setNetworkMemory(resourceProfile.networkMemory)
-                .setExtendedResources(resourceProfile.extendedResources.values());
+                .setExtendedResources(resourceProfile.extendedResources.values())
+                .setPreferredIp(resourceProfile.preferredIp);
     }
 
     /** Builder for the {@link ResourceProfile}. */
@@ -586,6 +615,7 @@ public class ResourceProfile implements Serializable {
         private MemorySize managedMemory = MemorySize.ZERO;
         private MemorySize networkMemory = MemorySize.ZERO;
         private Map<String, ExternalResource> extendedResources = new HashMap<>();
+        private Optional<String> preferredIp = Optional.empty();
 
         private Builder() {}
 
@@ -661,6 +691,22 @@ public class ResourceProfile implements Serializable {
             return this;
         }
 
+        /**
+         * Set the preferred IP address for slot allocation.
+         */
+        public Builder setPreferredIp(String preferredIp) {
+            this.preferredIp = Optional.ofNullable(preferredIp);
+            return this;
+        }
+
+        /**
+         * Set the preferred IP address for slot allocation.
+         */
+        public Builder setPreferredIp(Optional<String> preferredIp) {
+            this.preferredIp = checkNotNull(preferredIp);
+            return this;
+        }
+
         public ResourceProfile build() {
             return new ResourceProfile(
                     cpuCores,
@@ -668,7 +714,8 @@ public class ResourceProfile implements Serializable {
                     taskOffHeapMemory,
                     managedMemory,
                     networkMemory,
-                    extendedResources);
+                    extendedResources,
+                    preferredIp);
         }
     }
 }

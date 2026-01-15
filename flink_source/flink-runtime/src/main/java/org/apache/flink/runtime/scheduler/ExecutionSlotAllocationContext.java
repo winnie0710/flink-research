@@ -42,6 +42,14 @@ interface ExecutionSlotAllocationContext extends InputsLocationsRetriever, State
     ResourceProfile getResourceProfile(ExecutionVertexID executionVertexId);
 
     /**
+     * Returns the preferred IP address for an execution vertex based on migration plan.
+     *
+     * @param executionVertexId id of the execution vertex
+     * @return preferred IP address if specified in migration plan; otherwise {@code Optional.empty()}
+     */
+    Optional<String> getPreferredIp(ExecutionVertexID executionVertexId);
+
+    /**
      * Returns prior allocation id for an execution vertex.
      *
      * @param executionVertexId id of the execution vertex

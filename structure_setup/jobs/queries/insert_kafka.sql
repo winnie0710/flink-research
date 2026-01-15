@@ -36,7 +36,7 @@ CREATE TABLE nexmark_datagen_source (
     'connector' = 'datagen',
 
     -- 控制數據生成速率 (配合您的實驗需求，例如 1000 萬/秒可能太快，可先設低一點測試)
-    'rows-per-second' = '500',
+    'rows-per-second' = '500000',
 
     -- 欄位生成規則 (模擬真實數據分佈)
     'fields.auction.min' = '1',
@@ -47,7 +47,7 @@ CREATE TABLE nexmark_datagen_source (
     'fields.price.max' = '100000',
     'fields.channel.length' = '10',
     'fields.url.length' = '20',
-    'fields.extra.length' = '100'
+    'fields.extra.length' = '70'
 );
 
 -- ------------------------------------------------------------------------

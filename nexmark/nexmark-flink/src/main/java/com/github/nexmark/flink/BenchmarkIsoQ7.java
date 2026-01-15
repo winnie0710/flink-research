@@ -43,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Properties;
 import static com.github.nexmark.flink.metric.BenchmarkMetric.NUMBER_FORMAT;
 import static com.github.nexmark.flink.metric.BenchmarkMetric.formatDoubleValue;
 import static com.github.nexmark.flink.metric.BenchmarkMetric.formatLongValue;
@@ -250,13 +251,25 @@ public class BenchmarkIsoQ7 {
             // -------------------------------------------------------------------------
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
             env.getConfig().disableGenericTypes();
-            // 移除 env.disableOperatorChaining()，允許 Source/Filter/Map 自動鏈結
-            env.enableCheckpointing(10000);
+
+            // checkpoint 間隔，不要太頻繁
+            env.enableCheckpointing(120000);
 
             // -------------------------------------------------------------------------
             // 2. Kafka 設定
             // -------------------------------------------------------------------------
             String kafkaBootstrap = conf.getString("kafka.bootstrap.servers", "kafka:9092");
+            Properties properties = new Properties();
+            // 修改 1： 要求 Kafka 至少湊滿 1MB 資料才回傳，或者等待 500ms
+            properties.setProperty("fetch.min.bytes", "1048576"); // 1MB (預設是 1 byte)
+            properties.setProperty("fetch.max.wait.ms", "50");   // 最多等 500ms (預設是 500ms)
+            properties.setProperty("max.partition.fetch.bytes", "5242880"); // 每個分區最大拉取 5MB
+            // 預設是 500，這對於高吞吐 Benchmark 來說太小了
+            // 修改 2 ： 把它設為 5000，讓 Flink 一次可以處理更多數據，減少 poll 的次數
+            properties.setProperty("max.poll.records", "50000");
+
+            // 額外建議：增加 TCP 接收緩衝區 (針對 Docker 網路優化)
+            properties.setProperty("receive.buffer.bytes", "655360"); // 640KB
 
             KafkaSource<Event> source = KafkaSource.<Event>builder()
                     .setBootstrapServers(kafkaBootstrap)
@@ -264,6 +277,7 @@ public class BenchmarkIsoQ7 {
                     .setGroupId("nexmark-q7-isolated-group")
                     .setStartingOffsets(OffsetsInitializer.latest())
                     .setValueOnlyDeserializer(new NexmarkEventDeserializationSchema())   //解析 json 資訊，要驗證是否正確
+                    .setProperties(properties)
                     .build();
 
             // -------------------------------------------------------------------------
@@ -289,6 +303,7 @@ public class BenchmarkIsoQ7 {
                     .slotSharingGroup("ingest-group"); // 共享
 
             // 後續操作使用不同的 SlotSharingGroup 以強制隔離
+            // 每 2 秒鐘，結算過去 10 秒鐘的帳
             DataStream<Bid> maxBids = bids
                     .keyBy(bid -> bid.auction)
                     .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(2)))
@@ -315,6 +330,18 @@ public class BenchmarkIsoQ7 {
             // -------------------------------------------------------------------------
             // 4. Sink 設定
             // -------------------------------------------------------------------------
+            //Properties sinkProperties = new Properties();   # 設定批次發送電腦好像無法負荷
+            // [關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
+            // 這會犧牲一點點延遲(Latency)，換取巨大的吞吐量(Throughput)提升
+            //sinkProperties.setProperty("linger.ms", "1");
+            // [關鍵優化 2] Batch Size: 加大批次大小 (先設 16KB )
+            //sinkProperties.setProperty("batch.size", "16384");
+            // [關鍵優化 3] 壓縮: 減少網路傳輸量 (推薦 lz4 或 snappy，CPU 開銷極低)
+            //sinkProperties.setProperty("compression.type", "lz4");
+            // [選用] ACK 設定: 1 代表 Leader 收到就好，all 代表所有副本都要收到 (較慢但安全)
+            // 配合 AT_LEAST_ONCE，Flink 會確保資料不掉，設為 1 通常效能較好
+            //sinkProperties.setProperty("acks", "1");
+
             KafkaSink<String> sink = KafkaSink.<String>builder()
                     .setBootstrapServers(kafkaBootstrap)
                     .setRecordSerializer(KafkaRecordSerializationSchema.builder()
@@ -322,6 +349,7 @@ public class BenchmarkIsoQ7 {
                             .setValueSerializationSchema(new SimpleStringSchema())
                             .build())
                     .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+                    //.setKafkaProducerConfig(sinkProperties)
                     .build();
 
             highestBids.sinkTo(sink)

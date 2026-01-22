@@ -22,7 +22,7 @@ def main():
     )
 
     # 設定閾值
-    BUSY_THRESHOLD = 700      # busyTime 超過 700ms 視為過載
+    BUSY_THRESHOLD = 670      # busyTime 超過 700ms 視為過載
     SKEW_THRESHOLD = 200      # 傾斜度超過 200 觸發遷移
     CHECK_INTERVAL = 20       # 每 30 秒檢查一次
 

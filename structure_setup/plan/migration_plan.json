@@ -1,18 +1,1 @@
-{
-  "Source:_Source:_KafkaSource____Filter_Bids____Map_To_Bid____Map_0": "172_18_0_6",
-  "Source:_Source:_KafkaSource____Filter_Bids____Map_To_Bid____Map_1": "172_18_0_6",
-  "Source:_Source:_KafkaSource____Filter_Bids____Map_To_Bid____Map_2": "172_18_0_6",
-  "Source:_Source:_KafkaSource____Filter_Bids____Map_To_Bid____Map_3": "172_18_0_8",
-  "Window_Max____Map_0": "172_18_0_6",
-  "Window_Max____Map_1": "172_18_0_8",
-  "Window_Max____Map_2": "172_18_0_6",
-  "Window_Max____Map_3": "172_18_0_8",
-  "Window_Join_0": "172_18_0_8",
-  "Window_Join_1": "172_18_0_6",
-  "Window_Join_2": "172_18_0_6",
-  "Window_Join_3": "172_18_0_6",
-  "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_0": "172_18_0_6",
-  "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_1": "172_18_0_6",
-  "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_2": "172_18_0_6",
-  "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_3": "172_18_0_6"
-}
+{}

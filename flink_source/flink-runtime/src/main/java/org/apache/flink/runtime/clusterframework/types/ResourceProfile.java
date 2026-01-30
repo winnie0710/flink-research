@@ -119,7 +119,9 @@ public class ResourceProfile implements Serializable {
     private final Map<String, ExternalResource> extendedResources;
 
     /** Preferred IP address for slot allocation. Used for migration and placement control. */
-    private final Optional<String> preferredIp;
+    /**private final Optional<String> preferredIp; 這個不能序列化 */
+    @Nullable
+    private final String preferredIp;
 
     // ------------------------------------------------------------------------
 
@@ -141,7 +143,7 @@ public class ResourceProfile implements Serializable {
             final MemorySize managedMemory,
             final MemorySize networkMemory,
             final Map<String, ExternalResource> extendedResources,
-            final Optional<String> preferredIp) {
+            @Nullable final String preferredIp) {
 
         checkNotNull(cpuCores);
 
@@ -155,7 +157,7 @@ public class ResourceProfile implements Serializable {
                 checkNotNull(extendedResources).entrySet().stream()
                         .filter(entry -> !checkNotNull(entry.getValue()).isZero())
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        this.preferredIp = checkNotNull(preferredIp);
+        this.preferredIp = preferredIp;
     }
 
     /**
@@ -168,7 +170,7 @@ public class ResourceProfile implements Serializable {
         this.managedMemory = null;
         this.networkMemory = null;
         this.extendedResources = new HashMap<>();
-        this.preferredIp = Optional.empty();
+        this.preferredIp = null;
     }
 
     // ------------------------------------------------------------------------
@@ -256,9 +258,10 @@ public class ResourceProfile implements Serializable {
     /**
      * Get the preferred IP address for slot allocation.
      *
-     * @return The preferred IP address, or empty if not specified
+     * @return The preferred IP address, or null if not specified
      */
-    public Optional<String> getPreferredIp() {
+    @Nullable
+    public String getPreferredIp() {
         return preferredIp;
     }
 
@@ -364,7 +367,7 @@ public class ResourceProfile implements Serializable {
         result = 31 * result + Objects.hashCode(managedMemory);
         result = 31 * result + Objects.hashCode(networkMemory);
         result = 31 * result + extendedResources.hashCode();
-        result = 31 * result + preferredIp.hashCode();
+        result = 31 * result + Objects.hashCode(preferredIp);
         return result;
     }
 
@@ -414,7 +417,7 @@ public class ResourceProfile implements Serializable {
                 });
 
         // Prefer this profile's IP if present, otherwise use other's IP
-        Optional<String> mergedPreferredIp = this.preferredIp.isPresent()
+        String mergedPreferredIp = this.preferredIp != null
                 ? this.preferredIp
                 : other.preferredIp;
 
@@ -517,7 +520,7 @@ public class ResourceProfile implements Serializable {
                         : (", "
                                 + ExternalResourceUtils.generateExternalResourcesString(
                                         extendedResources.values())))
-                + (preferredIp.isPresent() ? ", preferredIp=" + preferredIp.get() : "")
+                + (preferredIp != null ? ", preferredIp=" + preferredIp : "")
                 + '}';
     }
 
@@ -615,7 +618,8 @@ public class ResourceProfile implements Serializable {
         private MemorySize managedMemory = MemorySize.ZERO;
         private MemorySize networkMemory = MemorySize.ZERO;
         private Map<String, ExternalResource> extendedResources = new HashMap<>();
-        private Optional<String> preferredIp = Optional.empty();
+        @Nullable
+        private String preferredIp = null;
 
         private Builder() {}
 
@@ -694,16 +698,8 @@ public class ResourceProfile implements Serializable {
         /**
          * Set the preferred IP address for slot allocation.
          */
-        public Builder setPreferredIp(String preferredIp) {
-            this.preferredIp = Optional.ofNullable(preferredIp);
-            return this;
-        }
-
-        /**
-         * Set the preferred IP address for slot allocation.
-         */
-        public Builder setPreferredIp(Optional<String> preferredIp) {
-            this.preferredIp = checkNotNull(preferredIp);
+        public Builder setPreferredIp(@Nullable String preferredIp) {
+            this.preferredIp = preferredIp;
             return this;
         }
 

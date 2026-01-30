@@ -32,16 +32,31 @@ import java.util.Optional;
 
 /**
  * Utility class for reading migration plans from JSON files.
- * The migration plan maps subtask IDs to target IP addresses.
- * 
+ *
+ * <p>Supports hybrid mapping strategy with two priority levels:
+ * <ol>
+ *   <li><b>Priority 1 (Fine-grained):</b> Subtask-level mapping
+ *       <br>Maps individual subtasks to target TaskManager resource IDs</li>
+ *   <li><b>Priority 2 (Coarse-grained):</b> Slot-sharing-group level mapping
+ *       <br>Maps entire slot sharing groups to target TaskManager resource IDs</li>
+ * </ol>
+ *
  * <p>Expected JSON format:
  * <pre>
  * {
- *   "operator-name_0": "192.168.1.100",
- *   "operator-name_1": "192.168.1.101",
- *   ...
+ *   // Subtask-level mappings (checked first)
+ *   "operator-name_0": "tm-source",
+ *   "operator-name_1": "tm-max",
+ *   "operator-name_2": "tm-join",
+ *
+ *   // Slot-sharing-group level mappings (fallback)
+ *   "ingest-group": "tm-source",
+ *   "window-max-group": "tm-max"
  * }
  * </pre>
+ *
+ * <p>The scheduler will first try to find a subtask-level mapping. If not found,
+ * it will fall back to the slot-sharing-group level mapping.
  */
 public class MigrationPlanReader {
 
@@ -60,7 +75,8 @@ public class MigrationPlanReader {
     /**
      * Reads the migration plan from the default location.
      *
-     * @return A map from subtask ID (as string) to target IP address
+     * @return A map containing both subtask-level and slot-sharing-group level mappings
+     *         from keys (subtask ID or group name) to target TaskManager resource-id
      */
     public Map<String, String> readMigrationPlan() {
         return readMigrationPlan(DEFAULT_MIGRATION_PLAN_PATH);
@@ -70,14 +86,15 @@ public class MigrationPlanReader {
      * Reads the migration plan from the specified file path.
      *
      * @param filePath The path to the migration plan JSON file
-     * @return A map from subtask ID (as string) to target IP address
+     * @return A map containing both subtask-level and slot-sharing-group level mappings
+     *         from keys (subtask ID or group name) to target TaskManager resource-id
      */
     public Map<String, String> readMigrationPlan(String filePath) {
         Map<String, String> migrationPlan = new HashMap<>();
 
         File file = new File(filePath);
         if (!file.exists()) {
-            LOG.warn("Migration plan file not found at: {}. No IP-based slot allocation will be performed.", filePath);
+            LOG.warn("Migration plan file not found at: {}. No resource-id-based slot allocation will be performed.", filePath);
             return migrationPlan;
         }
 
@@ -85,19 +102,31 @@ public class MigrationPlanReader {
             JsonNode rootNode = objectMapper.readTree(file);
 
             if (rootNode.isObject()) {
-                LOG.info("Parsing migration plan entries...");
+                LOG.info("Parsing migration plan entries (supports subtask-level and group-level mappings)...");
                 rootNode.fields().forEachRemaining(entry -> {
-                    String subtaskId = entry.getKey();
+                    String key = entry.getKey();
                     JsonNode valueNode = entry.getValue();
 
+                    // Skip comment fields
+                    if (key.startsWith("_comment")) {
+                        return;
+                    }
+
                     if (valueNode.isTextual()) {
-                        String targetIp = valueNode.asText();
-                        migrationPlan.put(subtaskId, targetIp);
-                        LOG.info("MigrationPlanReader: Subtask [{}] assigned to Target IP [{}]", 
-                                subtaskId, targetIp);
+                        String targetResourceId = valueNode.asText();
+                        migrationPlan.put(key, targetResourceId);
+
+                        // Determine if this is subtask-level or group-level mapping
+                        if (key.contains("_") && Character.isDigit(key.charAt(key.length() - 1))) {
+                            LOG.info("MigrationPlanReader: [Subtask] [{}] -> Resource-ID [{}]",
+                                    key, targetResourceId);
+                        } else {
+                            LOG.info("MigrationPlanReader: [Group] [{}] -> Resource-ID [{}]",
+                                    key, targetResourceId);
+                        }
                     } else {
-                        LOG.warn("Invalid value format for subtask {}: expected string, got {}", 
-                                subtaskId, valueNode.getNodeType());
+                        LOG.warn("Invalid value format for key {}: expected string, got {}",
+                                key, valueNode.getNodeType());
                     }
                 });
             } else {
@@ -115,13 +144,19 @@ public class MigrationPlanReader {
     }
 
     /**
-     * Gets the target IP for a specific subtask.
+     * Gets the target TaskManager resource-id for a specific key (subtask ID or group name).
      *
-     * @param subtaskId The subtask ID (e.g., "operator-name_0", "operator-name_1")
+     * <p>This method is used by the scheduler to look up target resource-ids for both:
+     * <ul>
+     *   <li>Subtask-level keys (e.g., "operator-name_0", "operator-name_1")</li>
+     *   <li>Slot-sharing-group level keys (e.g., "ingest-group", "window-max-group")</li>
+     * </ul>
+     *
+     * @param key The lookup key (subtask ID or slot-sharing-group name)
      * @param migrationPlan The migration plan map
-     * @return Optional containing the target IP if found, empty otherwise
+     * @return Target TaskManager resource-id if found, null otherwise
      */
-    public static Optional<String> getTargetIp(String subtaskId, Map<String, String> migrationPlan) {
-        return Optional.ofNullable(migrationPlan.get(subtaskId));
+    public static String getTargetIp(String key, Map<String, String> migrationPlan) {
+        return migrationPlan.get(key);
     }
 }

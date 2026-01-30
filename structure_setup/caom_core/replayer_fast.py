@@ -18,7 +18,7 @@ AMPLITUDE = (MAX_TPS - MIN_TPS) // 2
 # 路徑
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
-DATA_FILE_PATH = os.path.join(PROJECT_ROOT, 'source', 'nexmark_data_2.json')
+DATA_FILE_PATH = os.path.join(PROJECT_ROOT, 'source', 'nexmark_data.json')
 
 # Kafka 配置 (維持你的高效能設定)
 conf = {

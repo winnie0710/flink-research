@@ -71,17 +71,22 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
             @Nonnull Collection<TaskManagerLocation> locationPreferences,
             @Nonnull ResourceProfile resourceProfile) {
 
-        // Check if there's a preferred IP in the resource profile
-        final Optional<String> preferredIp = resourceProfile.getPreferredIp();
+        // Check if there's a target resource-id (stored in preferredIp field) in the resource profile
+        final String targetResourceId = resourceProfile.getPreferredIp();
 
-        // If preferred IP is specified, try to find an exact match first
-        if (preferredIp.isPresent()) {
-            Optional<SlotInfoAndLocality> ipMatchedSlot = 
-                    selectByPreferredIp(freeSlotInfoTracker, preferredIp.get(), resourceProfile);
-            if (ipMatchedSlot.isPresent()) {
-                return ipMatchedSlot;
+        LOG.debug("LocationPreferenceSlotSelection: ResourceProfile has targetResourceId: {}", targetResourceId);
+
+        // If target resource-id is specified, try to find an exact match first
+        if (targetResourceId != null) {
+            LOG.info("LocationPreferenceSlotSelection: Attempting to select slot by target Resource-ID: {}", targetResourceId);
+            Optional<SlotInfoAndLocality> resourceIdMatchedSlot =
+                    selectByTargetResourceId(freeSlotInfoTracker, targetResourceId, resourceProfile);
+            if (resourceIdMatchedSlot.isPresent()) {
+                LOG.info("LocationPreferenceSlotSelection: ✓ Successfully allocated slot with target Resource-ID: {}", targetResourceId);
+                return resourceIdMatchedSlot;
             }
-            // If no exact IP match found, fall through to normal location preference logic
+            // If no exact resource-id match found, fall through to normal location preference logic
+            LOG.warn("LocationPreferenceSlotSelection: ✗ Failed to find slot with target Resource-ID: {}, falling back to normal allocation", targetResourceId);
         }
 
         // we build up two indexes, one for resource id and one for host names of the preferred
@@ -138,43 +143,42 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
     }
 
     /**
-     * Selects a slot that exactly matches the preferred IP address.
+     * Selects a slot based on target TaskManager Resource ID.
      *
-     * @param freeSlotInfoTracker tracker of available slots
-     * @param preferredIp the preferred IP address
+     * @param freeSlotInfoTracker tracker for available slots
+     * @param targetResourceId the target TaskManager resource-id
      * @param resourceProfile the required resource profile
-     * @return the selected slot with IP_MATCHED locality, or empty if no match found
+     * @return the selected slot with RESOURCE_ID_MATCHED locality, or empty if no match found
      */
     @Nonnull
-    private Optional<SlotInfoAndLocality> selectByPreferredIp(
+    private Optional<SlotInfoAndLocality> selectByTargetResourceId(
             @Nonnull FreeSlotInfoTracker freeSlotInfoTracker,
-            @Nonnull String preferredIp,
+            @Nonnull String targetResourceId,
             @Nonnull ResourceProfile resourceProfile) {
 
-        LOG.info("SlotManager: Searching for slot with preferred IP: {}", preferredIp);
+        LOG.info("SlotManager: Searching for slot with target Resource-ID: {}", targetResourceId);
 
         for (AllocationID allocationId : freeSlotInfoTracker.getAvailableSlots()) {
             SlotInfo candidate = freeSlotInfoTracker.getSlotInfo(allocationId);
 
             if (candidate.getResourceProfile().isMatching(resourceProfile)) {
-                String candidateIp = candidate.getTaskManagerLocation().address().getHostAddress();
+                String candidateResourceId = candidate.getTaskManagerLocation().getResourceID().toString();
 
-                LOG.debug("SlotManager: Checking candidate slot on TM: {}", candidateIp);
+                LOG.debug("SlotManager: Checking candidate slot on TM Resource-ID: {}", candidateResourceId);
 
-                // Check for exact IP match
-                if (preferredIp.equals(candidateIp)) {
-                    LOG.info("SlotManager: ✓ Found matching slot! Allocating slot {} on TaskManager {} (IP: {})", 
-                            allocationId, 
-                            candidate.getTaskManagerLocation().getResourceID(), 
-                            candidateIp);
-                    // IP_MATCHED has highest priority (better than LOCAL)
+                // Check for exact resource-id match
+                if (targetResourceId.equals(candidateResourceId)) {
+                    LOG.info("SlotManager: ✓ Found matching slot! Allocating slot {} on TaskManager Resource-ID: {}",
+                            allocationId,
+                            candidateResourceId);
+                    // RESOURCE_ID_MATCHED has highest priority (better than LOCAL)
                     return Optional.of(SlotInfoAndLocality.of(candidate, Locality.LOCAL));
                 }
             }
         }
 
-        LOG.warn("SlotManager: ✗ No slot found matching preferred IP: {}. Will fall back to normal allocation.", 
-                preferredIp);
+        LOG.warn("SlotManager: ✗ No slot found matching target Resource-ID: {}. Will fall back to normal allocation.",
+                targetResourceId);
 
         return Optional.empty();
     }

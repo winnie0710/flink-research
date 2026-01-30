@@ -42,12 +42,21 @@ interface ExecutionSlotAllocationContext extends InputsLocationsRetriever, State
     ResourceProfile getResourceProfile(ExecutionVertexID executionVertexId);
 
     /**
-     * Returns the preferred IP address for an execution vertex based on migration plan.
+     * Returns the target TaskManager Resource ID for an execution vertex based on migration plan.
+     *
+     * <p>Supports hybrid mapping strategy:
+     * <ul>
+     *   <li>Priority 1: Subtask-level mapping (e.g., "operator-name_0" -> "tm-source")</li>
+     *   <li>Priority 2: Slot-sharing-group level mapping (e.g., "ingest-group" -> "tm-source")</li>
+     * </ul>
+     *
+     * <p>Note: Despite the method name "getPreferredIp", this returns the target resource-id
+     * rather than an IP address, to work with Flink 1.19's resource management.
      *
      * @param executionVertexId id of the execution vertex
-     * @return preferred IP address if specified in migration plan; otherwise {@code Optional.empty()}
+     * @return target TaskManager resource-id if specified in migration plan; otherwise {@code null}
      */
-    Optional<String> getPreferredIp(ExecutionVertexID executionVertexId);
+    String getPreferredIp(ExecutionVertexID executionVertexId);
 
     /**
      * Returns prior allocation id for an execution vertex.

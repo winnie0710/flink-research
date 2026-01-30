@@ -79,6 +79,7 @@ tools/japicmp-output
 venv/
 structure_setup/venv/
 structure_setup/source/
+structure_setup/save/
 # 忽略 IDE 設定
 .idea/
 

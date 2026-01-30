@@ -1,1 +1,37 @@
-{}
+{
+  "_comment_1": "=== Hybrid Mapping Strategy ===",
+  "_comment_2": "Priority 1: Subtask-level (fine-grained control)",
+  "_comment_3": "Priority 2: Slot-sharing-group level (coarse-grained fallback)",
+  "_comment_4": "",
+  "_comment_5": "=== Subtask-level Mapping ===",
+  "_comment_6": "Format: 'OperatorName_subtaskIndex' -> 'tm-resource-id'",
+
+  "Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map_0": "tm-source",
+  "Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map_1": "tm-source",
+  "Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map_2": "tm-source",
+  "Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map_3": "tm-source",
+
+  "Window-Max -> Map_0": "tm-max",
+  "Window-Max -> Map_1": "tm-max",
+  "Window-Max -> Map_2": "tm-max",
+  "Window-Max -> Map_3": "tm-max",
+
+  "Window-Join_0": "tm-join",
+  "Window-Join_1": "tm-join",
+  "Window-Join_2": "tm-join",
+  "Window-Join_3": "tm-join",
+
+  "Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer_0": "tm-sink",
+  "Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer_1": "tm-sink",
+  "Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer_2": "tm-sink",
+  "Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer_3": "tm-sink",
+
+  "_comment_7": "",
+  "_comment_8": "=== Slot-Sharing-Group Level Mapping (Fallback) ===",
+  "_comment_9": "Used if no subtask-level mapping found",
+
+  "ingest-group": "tm-source",
+  "window-max-group": "tm-max",
+  "window-join-group": "tm-join",
+  "sink-group": "tm-sink"
+}

@@ -141,6 +141,11 @@ class FlinkDetector:
             for r in data['data']['result']:
                 tm_id = r['metric'].get('tm_id', 'unknown')
                 host = r['metric'].get('host', 'unknown')
+
+                # 修正 IP 格式：如果包含下劃線，替換為點號
+                if '_' in host and not '.' in host:
+                    host = host.replace('_', '.')
+
                 load = float(r['value'][1])
 
                 tm_info[tm_id] = {

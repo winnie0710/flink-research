@@ -525,9 +525,12 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
             ResourceProfile baseProfile = getExecutionVertex(executionVertexId).getResourceProfile();
 
             // Check if there's a preferred IP for this execution vertex
-            Optional<String> preferredIp = getPreferredIp(executionVertexId);
+            String preferredIp = getPreferredIp(executionVertexId);
 
-            if (preferredIp.isPresent()) {
+            // Only add preferredIp if:
+            // 1. preferredIp is not null
+            // 2. baseProfile is not UNKNOWN (cannot modify UNKNOWN profile)
+            if (preferredIp != null && !baseProfile.equals(ResourceProfile.UNKNOWN)) {
                 // Create a new ResourceProfile with the preferred IP
                 return ResourceProfile.newBuilder(baseProfile)
                         .setPreferredIp(preferredIp)
@@ -538,24 +541,45 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
         }
 
         @Override
-        public Optional<String> getPreferredIp(final ExecutionVertexID executionVertexId) {
-            // Generate subtask ID in the format: "jobVertexName_subtaskIndex"
+        public String getPreferredIp(final ExecutionVertexID executionVertexId) {
+            // Hybrid Strategy: Try subtask-level mapping first, then fall back to slot-sharing-group level
+            // This allows fine-grained control per subtask OR coarse-grained control per group
+
+            // Step 1: Generate subtask ID and try subtask-level mapping (fine-grained)
             String jobVertexName = getExecutionVertex(executionVertexId)
                     .getJobVertex()
                     .getName();
             int subtaskIndex = executionVertexId.getSubtaskIndex();
             String subtaskId = jobVertexName + "_" + subtaskIndex;
 
-            Optional<String> preferredIp = MigrationPlanReader.getTargetIp(subtaskId, migrationPlan);
+            String targetResourceId = MigrationPlanReader.getTargetIp(subtaskId, migrationPlan);
 
-            if (preferredIp.isPresent()) {
-                log.info("Requesting Slot for {} with Preferred IP: {}", 
-                        subtaskId, preferredIp.get());
-            } else {
-                log.debug("No preferred IP found for subtask: {}", subtaskId);
+            if (targetResourceId != null) {
+                log.info("✓ Subtask-level mapping: [{}] -> Resource ID: [{}]",
+                        subtaskId, targetResourceId);
+                return targetResourceId;
             }
 
-            return preferredIp;
+            // Step 2: If no subtask-level mapping, try slot-sharing-group level (coarse-grained)
+            org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup slotSharingGroup =
+                    getExecutionVertex(executionVertexId)
+                            .getJobVertex()
+                            .getSlotSharingGroup();
+
+            if (slotSharingGroup != null) {
+                String groupName = slotSharingGroup.getName();
+                targetResourceId = MigrationPlanReader.getTargetIp(groupName, migrationPlan);
+
+                if (targetResourceId != null) {
+                    log.info("✓ Group-level mapping: slot-sharing-group [{}] -> Resource ID: [{}]",
+                            groupName, targetResourceId);
+                    return targetResourceId;
+                }
+            }
+
+            // Step 3: No mapping found
+            log.debug("No mapping found for subtask [{}] or its slot-sharing-group", subtaskId);
+            return null;
         }
 
         @Override

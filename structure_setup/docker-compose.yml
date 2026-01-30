@@ -57,7 +57,8 @@ services:
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./plan:/opt/flink/plan
       - ./save:/opt/flink/savepoints
-      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist-1.19.0.jar
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - FLINK_CLASSPATH=/opt/nexmark/*
@@ -87,7 +88,8 @@ services:
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
       - ./plan:/opt/flink/plan
       - ./save:/opt/flink/savepoints
-      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist-1.19.0.jar
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
@@ -116,7 +118,8 @@ services:
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
       - ./plan:/opt/flink/plan
       - ./save:/opt/flink/savepoints
-      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist-1.19.0.jar
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
@@ -143,7 +146,8 @@ services:
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
       - ./plan:/opt/flink/plan
       - ./save:/opt/flink/savepoints
-      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist-1.19.0.jar
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
@@ -170,7 +174,8 @@ services:
       - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
       - ./plan:/opt/flink/plan
       - ./save:/opt/flink/savepoints
-      - /home/yenwei/research/flink_source/flink-dist/target/flink-dist_2.12-1.19.0.jar:/opt/flink/lib/flink-dist-1.19.0.jar
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6

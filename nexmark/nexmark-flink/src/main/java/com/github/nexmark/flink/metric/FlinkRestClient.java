@@ -138,14 +138,30 @@ public class FlinkRestClient {
 		try {
 			JsonNode jsonNode = NexmarkUtils.MAPPER.readTree(response);
 			JsonNode vertices = jsonNode.get("vertices");
-            // 2. 繼續解析 Source Vertex
+			if (vertices == null || !vertices.isArray()) {
+				throw new RuntimeException("Invalid job response: 'vertices' field is missing or not an array. Response: " + response);
+			}
+
+			// 記錄所有 vertex 名稱以便除錯
+			StringBuilder vertexInfo = new StringBuilder("Available vertices: ");
+			for (int i = 0; i < vertices.size(); i++) {
+				JsonNode vertex = vertices.get(i);
+				String vertexName = vertex.get("name").asText();
+				vertexInfo.append(String.format("[%d] %s, ", i, vertexName));
+			}
+			System.out.println(vertexInfo.toString());
+
+            // 繼續解析 Source Vertex
             JsonNode sourceVertex = vertices.get(0);
-            checkArgument(
-				sourceVertex.get("name").asText().startsWith("Source:"),
-				"The first vertex is not a source.");
-			return sourceVertex.get("id").asText();
+			String sourceName = sourceVertex.get("name").asText();
+            if (!sourceName.startsWith("Source:")) {
+				System.err.println("Warning: The first vertex name '" + sourceName + "' does not start with 'Source:', but continuing anyway...");
+			}
+			String vertexId = sourceVertex.get("id").asText();
+			System.out.println("Selected source vertex: " + sourceName + " (ID: " + vertexId + ")");
+			return vertexId;
 		} catch (Exception e) {
-			throw new RuntimeException("The response is not a valid JSON string:\n" + response, e);  //這裡出現錯誤
+			throw new RuntimeException("Failed to parse source vertex ID. Response:\n" + response, e);
 		}
 	}
 

@@ -66,14 +66,28 @@ public class MetricReporter {
 		String vertexId;
 		String metricName;
 
+		// 添加超時機制，最多等待 60 秒
+		int maxRetries = 60;
+		int retries = 0;
+
 		while (true) {
 			Tuple2<String, String> jobInfo = getJobInformation(jobId);
 			if (jobInfo != null) {
 				vertexId = jobInfo.f0;
 				metricName = jobInfo.f1;
+				LOG.info("Successfully obtained job information. VertexId: {}, MetricName: {}", vertexId, metricName);
 				break;
 			} else {
+				retries++;
+				if (retries >= maxRetries) {
+					String errorMsg = String.format(
+						"Failed to get job information after %d retries. Job might not have started properly or metrics are not available.",
+						maxRetries);
+					LOG.error(errorMsg);
+					throw new RuntimeException(errorMsg);
+				}
 				// wait for the job startup
+				LOG.debug("Waiting for job {} to become ready (attempt {}/{})", jobId, retries, maxRetries);
 				try {
 					Thread.sleep(1000);
 				} catch (InterruptedException e) {

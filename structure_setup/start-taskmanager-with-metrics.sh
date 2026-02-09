@@ -3,6 +3,12 @@
 # TaskManager 啟動腳本，同時啟動 CPU Metric Sender
 ################################################################################
 
+# 如果設置了 TM_RESOURCE_ID 環境變量，寫入 flink-conf.yaml
+if [ -n "$TM_RESOURCE_ID" ]; then
+    echo "Setting TaskManager resource-id to: $TM_RESOURCE_ID"
+    echo "taskmanager.resource-id: $TM_RESOURCE_ID" >> /opt/flink/conf/flink-conf.yaml
+fi
+
 # 啟動 TaskManager（背景執行）
 # 使用 Flink 的標準啟動方式
 /opt/flink/bin/taskmanager.sh start-foreground &

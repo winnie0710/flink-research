@@ -81,7 +81,7 @@ services:
     container_name: tm-20c-1
     command: taskmanager
     volumes:
-      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/tm-20c-1-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
@@ -93,6 +93,7 @@ services:
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TM_RESOURCE_ID=tm-20c-1
     depends_on:
       - jobmanager
     deploy:
@@ -111,7 +112,7 @@ services:
     cap_add:
       - NET_ADMIN
     volumes:
-      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/tm-20c-2-net-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
@@ -123,6 +124,7 @@ services:
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TM_RESOURCE_ID=tm-20c-2-net
     depends_on:
       - jobmanager
     deploy:
@@ -139,7 +141,7 @@ services:
     container_name: tm-10c-3-cpu
     command: taskmanager
     volumes:
-      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/tm-10c-3-cpu-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
@@ -151,6 +153,7 @@ services:
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TM_RESOURCE_ID=tm-10c-3-cpu
     depends_on:
       - jobmanager
     deploy:
@@ -167,7 +170,7 @@ services:
     container_name: tm-20c-4
     command: taskmanager
     volumes:
-      - ./config/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/tm-20c-4-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
       - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
       - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
@@ -179,6 +182,7 @@ services:
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
       - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TM_RESOURCE_ID=tm-20c-4
     depends_on:
       - jobmanager
     deploy:

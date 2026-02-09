@@ -1,5 +1,5 @@
 import requests
-import numpy as np
+# import numpy as np
 import json
 import time
 import os
@@ -125,11 +125,11 @@ class FlinkDetector:
     def get_taskmanager_info(self):
         """
         查詢所有 TaskManager 的資訊和當前負載
-        返回: { tm_id: {"host": "192.168.1.100", "load": 0.5}, ... }
+        返回: { resource_id: {"host": "192.168.1.100", "load": 0.5}, ... }
         """
         try:
             # 查詢每個 TaskManager 的平均 CPU/負載
-            query = 'avg(flink_taskmanager_job_task_busyTimeMsPerSecond) by (tm_id, host)'
+            query = 'avg(flink_taskmanager_job_task_busyTimeMsPerSecond) by (resource_id, tm_id, host)'
             response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query})
             data = response.json()
 
@@ -139,7 +139,8 @@ class FlinkDetector:
 
             tm_info = {}
             for r in data['data']['result']:
-                tm_id = r['metric'].get('tm_id', 'unknown')
+                # 優先使用 resource_id，如果沒有則使用 tm_id
+                resource_id = r['metric'].get('resource_id') or r['metric'].get('tm_id', 'unknown')
                 host = r['metric'].get('host', 'unknown')
 
                 # 修正 IP 格式：如果包含下劃線，替換為點號
@@ -148,7 +149,7 @@ class FlinkDetector:
 
                 load = float(r['value'][1])
 
-                tm_info[tm_id] = {
+                tm_info[resource_id] = {
                     "host": host,
                     "load": load
                 }
@@ -161,8 +162,8 @@ class FlinkDetector:
 
     def get_subtask_locations(self):
         """
-        查詢每個 subtask 當前所在的 TaskManager host
-        返回: { "task_name_0": "192.168.1.100", ... }
+        查詢每個 subtask 當前所在的 TaskManager resource ID
+        返回: { "task_name_0": "tm-10c-3-cpu", ... }
         """
         try:
             query = 'flink_taskmanager_job_task_busyTimeMsPerSecond'
@@ -176,10 +177,11 @@ class FlinkDetector:
             for r in data['data']['result']:
                 task_name = r['metric'].get('task_name', 'Unknown')
                 subtask_index = r['metric'].get('subtask_index', '-1')
-                host = r['metric'].get('host', 'unknown')
+                # 優先使用 resource_id，如果沒有則使用 tm_id，最後才用 host
+                resource_id = r['metric'].get('resource_id') or r['metric'].get('tm_id', 'unknown')
 
                 subtask_id = f"{task_name}_{subtask_index}"
-                subtask_locations[subtask_id] = host
+                subtask_locations[subtask_id] = resource_id
 
             return subtask_locations
 
@@ -191,6 +193,7 @@ class FlinkDetector:
         """
         根據過載的 subtask 產生遷移計畫
         選擇負載最低的 TaskManager 作為目標
+        返回格式: { "subtask_id": "target_resource_id", ... }
         """
         tm_info = self.get_taskmanager_info()
         current_locations = self.get_subtask_locations()
@@ -199,24 +202,29 @@ class FlinkDetector:
             print("⚠️ 無法獲取 TaskManager 資訊，無法產生遷移計畫")
             return None
 
-        # 按負載排序 TaskManager
+        # 按負載排序 TaskManager (由低到高)
         sorted_tms = sorted(tm_info.items(), key=lambda x: x[1]['load'])
 
         migration_plan = {}
 
         for subtask_id, current_load in overloaded_subtasks:
-            current_host = current_locations.get(subtask_id, 'unknown')
+            current_resource_id = current_locations.get(subtask_id, 'unknown')
 
-            # 找到負載最低且不是當前位置的 TM
-            target_tm = None
-            for tm_id, info in sorted_tms:
-                if info['host'] != current_host:
-                    target_tm = info
+            # 找到負載最低且不是當前 resource_id 的 TM
+            target_resource_id = None
+            target_info = None
+
+            for resource_id, info in sorted_tms:
+                if resource_id != current_resource_id:
+                    target_resource_id = resource_id
+                    target_info = info
                     break
 
-            if target_tm:
-                migration_plan[subtask_id] = target_tm['host']
-                print(f"📋 計畫遷移: {subtask_id} 從 {current_host} -> {target_tm['host']} (負載: {target_tm['load']:.1f})")
+            if target_resource_id and target_info:
+                migration_plan[subtask_id] = target_resource_id
+                print(f"📋 計畫遷移: {subtask_id}")
+                print(f"   從: {current_resource_id} -> 到: {target_resource_id}")
+                print(f"   目標 host: {target_info['host']}, 負載: {target_info['load']:.1f}")
 
         return migration_plan
 

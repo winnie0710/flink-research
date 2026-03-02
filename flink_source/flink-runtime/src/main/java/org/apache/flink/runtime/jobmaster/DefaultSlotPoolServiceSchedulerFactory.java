@@ -267,17 +267,23 @@ public final class DefaultSlotPoolServiceSchedulerFactory
         final boolean isLocalRecoveryEnabled =
                 configuration.get(CheckpointingOptions.LOCAL_RECOVERY);
 
-        if (isLocalRecoveryEnabled) {
-            if (jobType == JobType.STREAMING) {
-                return PreferredAllocationRequestSlotMatchingStrategy.INSTANCE;
-            } else {
-                LOG.warn(
-                        "Batch jobs do not support local recovery. Falling back for request slot matching strategy to {}.",
-                        SimpleRequestSlotMatchingStrategy.class.getSimpleName());
-                return SimpleRequestSlotMatchingStrategy.INSTANCE;
-            }
-        } else {
-            return SimpleRequestSlotMatchingStrategy.INSTANCE;
+        // IMPORTANT: Always use PreferredAllocationRequestSlotMatchingStrategy for STREAMING jobs
+        // This is needed for:
+        // 1. Local recovery (original use case)
+        // 2. Migration plan with preferredIp (our use case)
+        if (jobType == JobType.STREAMING) {
+            LOG.info("Using PreferredAllocationRequestSlotMatchingStrategy for STREAMING job (local_recovery={})",
+                    isLocalRecoveryEnabled);
+            return PreferredAllocationRequestSlotMatchingStrategy.INSTANCE;
         }
+
+        // For BATCH jobs, only use preferred strategy if local recovery is enabled
+        if (isLocalRecoveryEnabled) {
+            LOG.warn(
+                    "Batch jobs do not support local recovery. Falling back for request slot matching strategy to {}.",
+                    SimpleRequestSlotMatchingStrategy.class.getSimpleName());
+        }
+
+        return SimpleRequestSlotMatchingStrategy.INSTANCE;
     }
 }

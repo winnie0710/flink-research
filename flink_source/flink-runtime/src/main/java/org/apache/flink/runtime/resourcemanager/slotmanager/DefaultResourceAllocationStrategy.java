@@ -23,9 +23,13 @@ import org.apache.flink.api.common.resources.CPUResource;
 import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.runtime.blocklist.BlockedTaskManagerChecker;
+import org.apache.flink.runtime.clusterframework.types.ResourceID;
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
 import org.apache.flink.runtime.slots.ResourceRequirement;
+import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
 import org.apache.flink.util.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Queue;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -63,6 +68,8 @@ import static org.apache.flink.runtime.resourcemanager.slotmanager.SlotManagerUt
  * multidimensional resource profiles. The complexity is not necessary.
  */
 public class DefaultResourceAllocationStrategy implements ResourceAllocationStrategy {
+    private static final Logger LOG = LoggerFactory.getLogger(DefaultResourceAllocationStrategy.class);
+
     private final ResourceProfile defaultSlotResourceProfile;
     private final ResourceProfile totalResourceProfile;
     private final int numSlotsPerWorker;
@@ -263,7 +270,8 @@ public class DefaultResourceAllocationStrategy implements ResourceAllocationStra
                                                 resultBuilder.addAllocationOnRegisteredResource(
                                                         jobId,
                                                         taskManager.getInstanceId(),
-                                                        slotProfile)))
+                                                        slotProfile),
+                                        taskManager.getTaskExecutorConnection().getResourceID())) // ✅ Pass ResourceID
                 .collect(Collectors.toList());
     }
 
@@ -293,19 +301,104 @@ public class DefaultResourceAllocationStrategy implements ResourceAllocationStra
         Collection<ResourceRequirement> outstandingRequirements = new ArrayList<>();
 
         for (ResourceRequirement resourceRequirement : missingResources) {
-            int numMissingRequirements =
-                    availableResourceMatchingStrategy.tryFulfilledRequirementWithResource(
-                            registeredResources,
-                            resourceRequirement.getNumberOfRequiredSlots(),
-                            resourceRequirement.getResourceProfile(),
-                            jobId);
-            if (numMissingRequirements > 0) {
+            int numUnfulfilled = resourceRequirement.getNumberOfRequiredSlots();
+            ResourceProfile requiredProfile = resourceRequirement.getResourceProfile();
+            String preferredIp = requiredProfile.getPreferredIp();
+
+            // ✅ If there is a preferred IP, try to allocate on that specific TaskManager first
+            if (preferredIp != null && !preferredIp.isEmpty()) {
+                LOG.info("🎯 Attempting to allocate {} slots with preferredIp={} for JobID: {}",
+                        numUnfulfilled, preferredIp, jobId);
+                numUnfulfilled = tryAllocateOnPreferredTaskManager(
+                        registeredResources,
+                        numUnfulfilled,
+                        requiredProfile,
+                        preferredIp,
+                        jobId);
+                LOG.info("📊 After preferred allocation: {} slots still unfulfilled", numUnfulfilled);
+            }
+
+            // If preferred allocation is not enough, use default strategy
+            if (numUnfulfilled > 0) {
+                numUnfulfilled =
+                        availableResourceMatchingStrategy.tryFulfilledRequirementWithResource(
+                                registeredResources,
+                                numUnfulfilled,
+                                requiredProfile,
+                                jobId);
+            }
+
+            if (numUnfulfilled > 0) {
                 outstandingRequirements.add(
-                        ResourceRequirement.create(
-                                resourceRequirement.getResourceProfile(), numMissingRequirements));
+                        ResourceRequirement.create(requiredProfile, numUnfulfilled));
             }
         }
         return outstandingRequirements;
+    }
+
+    /**
+     * ✅ Precisely allocate slots on the preferred TaskManager by matching ResourceID string.
+     * This method implements the core logic for exact matching based on migration plan.
+     */
+    private int tryAllocateOnPreferredTaskManager(
+            List<InternalResourceInfo> registeredResources,
+            int numUnfulfilled,
+            ResourceProfile requiredResource,
+            String preferredIp,
+            JobID jobId) {
+
+        LOG.info("🔍 Looking for TaskManager with ResourceID: {}", preferredIp);
+
+        Iterator<InternalResourceInfo> iterator = registeredResources.iterator();
+
+        while (numUnfulfilled > 0 && iterator.hasNext()) {
+            InternalResourceInfo resourceInfo = iterator.next();
+            ResourceID resourceId = resourceInfo.getResourceId();
+
+            if (resourceId == null) {
+                continue; // Skip resources without ResourceID (e.g., pending TMs)
+            }
+
+            // ✅ Direct string comparison of ResourceID
+            boolean isPreferred = resourceId.getResourceIdString().equals(preferredIp);
+
+            if (!isPreferred) {
+                LOG.debug("❌ TaskManager {} does NOT match preferredIp {}",
+                        resourceId.getResourceIdString(), preferredIp);
+                continue; // Skip non-preferred TaskManagers
+            }
+
+            LOG.info("✅ Found matching TaskManager: {} == {}",
+                    resourceId.getResourceIdString(), preferredIp);
+
+            // Allocate as many slots as possible on this preferred TaskManager
+            int allocatedOnThisTM = 0;
+            while (numUnfulfilled > 0
+                    && resourceInfo.tryAllocateSlotForJob(jobId, requiredResource)) {
+                numUnfulfilled--;
+                allocatedOnThisTM++;
+            }
+
+            if (allocatedOnThisTM > 0) {
+                LOG.info("✅ Successfully allocated {} slots on preferred TaskManager {} (remaining unfulfilled: {})",
+                        allocatedOnThisTM, resourceId.getResourceIdString(), numUnfulfilled);
+            }
+
+            // Remove TaskManager from list if no resources left
+            if (resourceInfo.availableProfile.equals(ResourceProfile.ZERO)) {
+                iterator.remove();
+            }
+
+            // Once we found the preferred TM, stop searching (even if it's full)
+            break;
+        }
+
+        if (numUnfulfilled > 0) {
+            LOG.warn("⚠️ Could not fulfill {} slots on preferred TaskManager {}",
+                    numUnfulfilled, preferredIp);
+        }
+
+        return numUnfulfilled;
     }
 
     private static boolean canFulfillRequirement(
@@ -444,12 +537,22 @@ public class DefaultResourceAllocationStrategy implements ResourceAllocationStra
         private final ResourceProfile totalProfile;
         private ResourceProfile availableProfile;
         private double utilization;
+        private final ResourceID resourceId; // ✅ Added ResourceID field
 
         InternalResourceInfo(
                 ResourceProfile defaultSlotProfile,
                 ResourceProfile totalProfile,
                 ResourceProfile availableProfile,
                 BiConsumer<JobID, ResourceProfile> allocationConsumer) {
+            this(defaultSlotProfile, totalProfile, availableProfile, allocationConsumer, null);
+        }
+
+        InternalResourceInfo(
+                ResourceProfile defaultSlotProfile,
+                ResourceProfile totalProfile,
+                ResourceProfile availableProfile,
+                BiConsumer<JobID, ResourceProfile> allocationConsumer,
+                ResourceID resourceId) {
             Preconditions.checkState(!defaultSlotProfile.equals(ResourceProfile.UNKNOWN));
             Preconditions.checkState(!totalProfile.equals(ResourceProfile.UNKNOWN));
             Preconditions.checkState(!availableProfile.equals(ResourceProfile.UNKNOWN));
@@ -457,7 +560,12 @@ public class DefaultResourceAllocationStrategy implements ResourceAllocationStra
             this.totalProfile = totalProfile;
             this.availableProfile = availableProfile;
             this.allocationConsumer = allocationConsumer;
+            this.resourceId = resourceId;
             this.utilization = updateUtilization();
+        }
+
+        ResourceID getResourceId() {
+            return resourceId;
         }
 
         boolean tryAllocateSlotForJob(JobID jobId, ResourceProfile requirement) {

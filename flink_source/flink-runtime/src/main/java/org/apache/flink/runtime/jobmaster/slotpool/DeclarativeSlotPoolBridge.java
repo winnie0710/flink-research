@@ -190,25 +190,60 @@ public class DeclarativeSlotPoolBridge extends DeclarativeSlotPoolService implem
             }
         }
 
-        getDeclarativeSlotPool().decreaseResourceRequirementsBy(decreasedResourceRequirements);
+        if (!decreasedResourceRequirements.isEmpty()) {
+            log.info("📉 [REQUIREMENT--] Decreasing requirements by: {}", decreasedResourceRequirements);
+            getDeclarativeSlotPool().decreaseResourceRequirementsBy(decreasedResourceRequirements);
+            log.info("📉 [REQUIREMENT--] After decrease, total requirements: {}",
+                    getDeclarativeSlotPool().getResourceRequirements());
+        }
     }
 
     @Override
     protected void onReleaseTaskManager(ResourceCounter previouslyFulfilledRequirement) {
-        getDeclarativeSlotPool().decreaseResourceRequirementsBy(previouslyFulfilledRequirement);
+        if (!previouslyFulfilledRequirement.isEmpty()) {
+            log.info("📉 [REQUIREMENT--] onReleaseTaskManager decreasing by: {}", previouslyFulfilledRequirement);
+            getDeclarativeSlotPool().decreaseResourceRequirementsBy(previouslyFulfilledRequirement);
+            log.info("📉 [REQUIREMENT--] After decrease, total requirements: {}",
+                    getDeclarativeSlotPool().getResourceRequirements());
+        }
     }
 
     @VisibleForTesting
     void newSlotsAreAvailable(Collection<? extends PhysicalSlot> newSlots) {
+        log.info("🔔 newSlotsAreAvailable called with {} new slots, {} pending requests",
+                newSlots.size(), pendingRequests.size());
+
+        // Log details of new slots
+        for (PhysicalSlot slot : newSlots) {
+            log.info("  📦 New slot: AllocationID={}, ResourceID={}, ResourceProfile={}",
+                    slot.getAllocationId(),
+                    slot.getTaskManagerLocation().getResourceID(),
+                    slot.getResourceProfile());
+        }
+
+        // Log details of pending requests
+        for (PendingRequest request : pendingRequests.values()) {
+            log.info("  📋 Pending request: SlotRequestId={}, ResourceProfile={}, PreferredIp={}",
+                    request.getSlotRequestId(),
+                    request.getResourceProfile(),
+                    request.getResourceProfile().getPreferredIp());
+        }
+
         final Collection<RequestSlotMatchingStrategy.RequestSlotMatch> requestSlotMatches =
                 requestSlotMatchingStrategy.matchRequestsAndSlots(
                         newSlots, pendingRequests.values());
+
+        log.info("🎯 Matching strategy returned {} matches", requestSlotMatches.size());
 
         for (RequestSlotMatchingStrategy.RequestSlotMatch match : requestSlotMatches) {
             final PendingRequest pendingRequest = match.getPendingRequest();
             final PhysicalSlot slot = match.getSlot();
 
-            log.debug("Matched pending request {} with slot {}.", pendingRequest, slot);
+            log.info("✅ Matched pending request {} (preferredIp={}) with slot {} (ResourceID={})",
+                    pendingRequest.getSlotRequestId(),
+                    pendingRequest.getResourceProfile().getPreferredIp(),
+                    slot.getAllocationId(),
+                    slot.getTaskManagerLocation().getResourceID());
 
             Preconditions.checkNotNull(
                     pendingRequests.remove(pendingRequest.getSlotRequestId()),
@@ -236,9 +271,20 @@ public class DeclarativeSlotPoolBridge extends DeclarativeSlotPoolService implem
             SlotRequestId slotRequestId,
             AllocationID allocationId,
             ResourceProfile resourceProfile) {
-        log.debug("Reserve slot {} for slot request id {}", allocationId, slotRequestId);
+        log.info("🔒 [RESERVE SLOT] Reserving slot {} for pending request {} (preferredIp={})",
+                allocationId, slotRequestId, resourceProfile.getPreferredIp());
+        log.info("🔒 [RESERVE SLOT] This is for a PENDING request - NOT increasing requirements (already counted)");
+
+        // IMPORTANT: Do NOT increase requirements here!
+        // This method is called from newSlotsAreAvailable() for pending requests.
+        // The requirement was already increased in internalRequestNewAllocatedSlot().
+        // If we increase again here, we get double counting!
+
         getDeclarativeSlotPool().reserveFreeSlot(allocationId, resourceProfile);
         fulfilledRequests.put(slotRequestId, allocationId);
+
+        log.info("🔒 [RESERVE SLOT] Slot reserved, total requirements unchanged: {}",
+                getDeclarativeSlotPool().getResourceRequirements());
     }
 
     @Override
@@ -263,9 +309,21 @@ public class DeclarativeSlotPoolBridge extends DeclarativeSlotPoolService implem
             SlotRequestId slotRequestId,
             AllocationID allocationId,
             ResourceProfile requiredSlotProfile) {
+        log.info("📈 [REQUIREMENT++] reserveFreeSlotForResource called for NEW allocation request");
+        log.info("📈 [REQUIREMENT++]   SlotRequestId={}, AllocationID={}, preferredIp={}",
+                slotRequestId, allocationId, requiredSlotProfile.getPreferredIp());
+        log.info("📈 [REQUIREMENT++] This is a DIRECT allocation from free pool (not from pending request)");
+        log.info("📈 [REQUIREMENT++] Increasing requirements because this is a NEW request");
+
+        // This method is called from allocateAvailableSlot() for DIRECT allocations
+        // (not from pending requests). We need to increase requirements here.
         getDeclarativeSlotPool()
                 .increaseResourceRequirementsBy(
                         ResourceCounter.withResource(requiredSlotProfile, 1));
+
+        log.info("📈 [REQUIREMENT++] After increase, total requirements: {}",
+                getDeclarativeSlotPool().getResourceRequirements());
+
         final PhysicalSlot physicalSlot =
                 getDeclarativeSlotPool().reserveFreeSlot(allocationId, requiredSlotProfile);
         fulfilledRequests.put(slotRequestId, allocationId);
@@ -347,9 +405,22 @@ public class DeclarativeSlotPoolBridge extends DeclarativeSlotPoolService implem
     private void internalRequestNewAllocatedSlot(PendingRequest pendingRequest) {
         pendingRequests.put(pendingRequest.getSlotRequestId(), pendingRequest);
 
+        log.info("📈 [REQUIREMENT++] Increasing requirements for SlotRequestId={}, ResourceProfile={}, preferredIp={}",
+                pendingRequest.getSlotRequestId(),
+                pendingRequest.getResourceProfile(),
+                pendingRequest.getResourceProfile().getPreferredIp());
+
+        // Log stack trace to see who is calling this
+        if (log.isDebugEnabled()) {
+            log.debug("📈 [REQUIREMENT++] Call stack:", new Exception("Stack trace"));
+        }
+
         getDeclarativeSlotPool()
                 .increaseResourceRequirementsBy(
                         ResourceCounter.withResource(pendingRequest.getResourceProfile(), 1));
+
+        log.info("📈 [REQUIREMENT++] After increase, total requirements: {}",
+                getDeclarativeSlotPool().getResourceRequirements());
     }
 
     @Override

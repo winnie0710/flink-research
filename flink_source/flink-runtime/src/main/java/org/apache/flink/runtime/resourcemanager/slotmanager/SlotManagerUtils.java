@@ -96,7 +96,23 @@ public class SlotManagerUtils {
 
     public static ResourceProfile getEffectiveResourceProfile(
             ResourceProfile requirement, ResourceProfile defaultResourceProfile) {
-        return requirement.equals(ResourceProfile.UNKNOWN) ? defaultResourceProfile : requirement;
+        if (requirement.equals(ResourceProfile.UNKNOWN)) {
+            return defaultResourceProfile;
+        }
+
+        // If requirement has zero resources but has preferredIp, use default resources + preferredIp
+        if (isZeroResources(requirement) && requirement.getPreferredIp() != null) {
+            return ResourceProfile.newBuilder(defaultResourceProfile)
+                    .setPreferredIp(requirement.getPreferredIp())
+                    .build();
+        }
+
+        return requirement;
+    }
+
+    private static boolean isZeroResources(ResourceProfile profile) {
+        return profile.getCpuCores().getValue().doubleValue() == 0.0
+                && profile.getTotalMemory().getBytes() == 0;
     }
 
     public static ResourceProfile generateTaskManagerTotalResourceProfile(

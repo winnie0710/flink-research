@@ -275,7 +275,14 @@ public class TaskSlot<T extends TaskSlotPayload> implements AutoCloseableAsync {
                 "The task slot is not in state active or allocated.");
         Preconditions.checkState(allocationId != null, "The task slot are not allocated");
 
-        return new SlotOffer(allocationId, index, resourceProfile);
+        // Clean preferredIp from ResourceProfile before offering the slot
+        // The slot's source should be determined by TaskManager's ResourceID, not by preferredIp
+        // preferredIp in the request was used for allocation, but should not be propagated back
+        ResourceProfile cleanedProfile = ResourceProfile.newBuilder(resourceProfile)
+                .setPreferredIp(null)
+                .build();
+
+        return new SlotOffer(allocationId, index, cleanedProfile);
     }
 
     @Override

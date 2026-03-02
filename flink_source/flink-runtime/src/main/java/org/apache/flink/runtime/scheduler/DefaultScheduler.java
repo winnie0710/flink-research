@@ -116,6 +116,9 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
     /** Migration plan mapping subtask IDs to target IPs. */
     private final Map<String, String> migrationPlan;
 
+    /** Default slot resource profile for filling zero-resource requirements. */
+    private final ResourceProfile defaultSlotResourceProfile;
+
     protected DefaultScheduler(
             final Logger log,
             final JobGraph jobGraph,
@@ -172,8 +175,12 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
         // Initialize migration plan reader and load migration plan
         this.migrationPlanReader = new MigrationPlanReader();
         this.migrationPlan = migrationPlanReader.readMigrationPlan();
-        log.info("Loaded migration plan with {} entries for job {}", 
+        log.info("Loaded migration plan with {} entries for job {}",
                 migrationPlan.size(), jobGraph.getJobID());
+
+        // Initialize default slot resource profile from configuration
+        this.defaultSlotResourceProfile = computeDefaultSlotResourceProfile(jobMasterConfiguration);
+        log.info("Computed default slot resource profile: {}", this.defaultSlotResourceProfile);
 
         final FailoverStrategy failoverStrategy =
                 failoverStrategyFactory.create(
@@ -518,6 +525,32 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
         notifyCoordinatorsAboutTaskFailure(execution, null);
     }
 
+    /**
+     * Computes the default slot resource profile from the JobMaster configuration.
+     * This is used to fill in zero-resource ResourceProfiles that have preferredIp set.
+     *
+     * Since TaskExecutorResourceUtils.resourceSpecFromConfig is package-private,
+     * we create a reasonable default based on typical TaskManager settings.
+     *
+     * @param configuration The JobMaster configuration
+     * @return The computed default slot resource profile
+     */
+    private ResourceProfile computeDefaultSlotResourceProfile(Configuration configuration) {
+        // Create a reasonable default based on typical 4GB TaskManager with 6 slots
+        // This matches the actual slot profile seen in production:
+        // cpuCores=1, taskHeapMemory=243.200mb, managedMemory=228.693mb, networkMemory=57.173mb
+        ResourceProfile defaultProfile = ResourceProfile.newBuilder()
+                .setCpuCores(new org.apache.flink.api.common.resources.CPUResource(1.0))
+                .setTaskHeapMemory(org.apache.flink.configuration.MemorySize.ofMebiBytes(243))
+                .setTaskOffHeapMemory(org.apache.flink.configuration.MemorySize.ZERO)
+                .setManagedMemory(org.apache.flink.configuration.MemorySize.ofMebiBytes(228))
+                .setNetworkMemory(org.apache.flink.configuration.MemorySize.ofMebiBytes(57))
+                .build();
+
+        log.info("🔧 Using default slot profile: {}", defaultProfile);
+        return defaultProfile;
+    }
+
     private class DefaultExecutionSlotAllocationContext implements ExecutionSlotAllocationContext {
 
         @Override
@@ -527,21 +560,45 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
             // Check if there's a preferred IP for this execution vertex
             String preferredIp = getPreferredIp(executionVertexId);
 
-            // Only add preferredIp if:
-            // 1. preferredIp is not null
-            // 2. baseProfile is not UNKNOWN (cannot modify UNKNOWN profile)
-            if (preferredIp != null && !baseProfile.equals(ResourceProfile.UNKNOWN)) {
-                // Create a new ResourceProfile with the preferred IP
-                return ResourceProfile.newBuilder(baseProfile)
-                        .setPreferredIp(preferredIp)
-                        .build();
+            // Add preferredIp if available
+            if (preferredIp != null) {
+                log.info("🎯 Setting preferredIp={} for ExecutionVertex {}", preferredIp, executionVertexId);
+
+                ResourceProfile profileWithPreferredIp;
+
+                // For UNKNOWN or zero-resource profiles, use default slot resource profile
+                if (baseProfile.equals(ResourceProfile.UNKNOWN) || isZeroResources(baseProfile)) {
+                    // Use the pre-computed default slot resource profile with preferredIp
+                    profileWithPreferredIp = ResourceProfile.newBuilder(defaultSlotResourceProfile)
+                            .setPreferredIp(preferredIp)
+                            .build();
+                    log.info("📦 Using default slot resources with preferredIp: {}", profileWithPreferredIp);
+                } else {
+                    // For specific profiles, add preferredIp to existing profile
+                    profileWithPreferredIp = ResourceProfile.newBuilder(baseProfile)
+                            .setPreferredIp(preferredIp)
+                            .build();
+                    log.info("📦 Using existing profile resources with preferredIp: {}", profileWithPreferredIp);
+                }
+
+                return profileWithPreferredIp;
             }
 
             return baseProfile;
         }
 
+        /**
+         * Check if a ResourceProfile has zero resources (CPU and memory).
+         */
+        private boolean isZeroResources(ResourceProfile profile) {
+            return profile.getCpuCores().getValue().doubleValue() == 0.0
+                    && profile.getTotalMemory().getBytes() == 0;
+        }
+
         @Override
         public String getPreferredIp(final ExecutionVertexID executionVertexId) {
+            log.info("🔍 getPreferredIp called for ExecutionVertexID: {}", executionVertexId);
+
             // Hybrid Strategy: Try subtask-level mapping first, then fall back to slot-sharing-group level
             // This allows fine-grained control per subtask OR coarse-grained control per group
 
@@ -550,15 +607,27 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
                     .getJobVertex()
                     .getName();
             int subtaskIndex = executionVertexId.getSubtaskIndex();
-            String subtaskId = jobVertexName + "_" + subtaskIndex;
+
+            // Convert job vertex name to migration plan format
+            // Flink uses: "Window-Max -> Map" or "Source: KafkaSource -> Filter-Bids -> Map"
+            // Migration plan uses: "Window_Max____Map" or "Source:_KafkaSource____Filter_Bids____Map"
+            String normalizedName = normalizeName(jobVertexName);
+            String subtaskId = normalizedName + "_" + subtaskIndex;
+
+            log.info("🔍 Looking up migration plan for subtaskId: [{}] (original={}, normalized={}, index={})",
+                    subtaskId, jobVertexName, normalizedName, subtaskIndex);
 
             String targetResourceId = MigrationPlanReader.getTargetIp(subtaskId, migrationPlan);
+
+            log.info("🔍 MigrationPlanReader.getTargetIp returned: {}", targetResourceId);
 
             if (targetResourceId != null) {
                 log.info("✓ Subtask-level mapping: [{}] -> Resource ID: [{}]",
                         subtaskId, targetResourceId);
                 return targetResourceId;
             }
+
+            log.info("⚠️ No subtask-level mapping found for: [{}]", subtaskId);
 
             // Step 2: If no subtask-level mapping, try slot-sharing-group level (coarse-grained)
             org.apache.flink.runtime.jobmanager.scheduler.SlotSharingGroup slotSharingGroup =
@@ -567,12 +636,12 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
                             .getSlotSharingGroup();
 
             if (slotSharingGroup != null) {
-                String groupName = slotSharingGroup.getName();
-                targetResourceId = MigrationPlanReader.getTargetIp(groupName, migrationPlan);
+                String groupId = slotSharingGroup.getSlotSharingGroupId().toString();
+                targetResourceId = MigrationPlanReader.getTargetIp(groupId, migrationPlan);
 
                 if (targetResourceId != null) {
                     log.info("✓ Group-level mapping: slot-sharing-group [{}] -> Resource ID: [{}]",
-                            groupName, targetResourceId);
+                            groupId, targetResourceId);
                     return targetResourceId;
                 }
             }
@@ -580,6 +649,31 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
             // Step 3: No mapping found
             log.debug("No mapping found for subtask [{}] or its slot-sharing-group", subtaskId);
             return null;
+        }
+
+        /**
+         * Normalize job vertex name to match migration plan format.
+         * Converts Flink's display format to migration plan's identifier format.
+         *
+         * Examples:
+         * - "Window-Max -> Map" -> "Window_Max____Map"
+         * - "Window-Join" -> "Window_Join"
+         * - "Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map"
+         *   -> "Source:_Source:_KafkaSource____Filter_Bids____Map_To_Bid____Map"
+         * - "Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer"
+         *   -> "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer"
+         */
+        private String normalizeName(String name) {
+            // Step 1: Replace " -> " (space-arrow-space) with "____" (four underscores)
+            String normalized = name.replace(" -> ", "____");
+
+            // Step 2: Replace ": " (colon-space) with ":_" (colon-underscore)
+            normalized = normalized.replace(": ", ":_");
+
+            // Step 3: Replace "-" (hyphen) with "_" (underscore) for remaining hyphens
+            normalized = normalized.replace("-", "_");
+
+            return normalized;
         }
 
         @Override

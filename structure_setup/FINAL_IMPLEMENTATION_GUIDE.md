@@ -298,11 +298,6 @@ ResourceProfile profile = ResourceProfile.newBuilder()
         .build();
 ```
 
-#### 解决方案 C: 简化版 - 基于 JobID + 顺序
-
-如果你的系统中每次只有一个 job，可以简化：
-- Migration plan 使用 `subtask_0`, `subtask_1`, ... 这样的简单标识
-- ResourceManager 按照请求顺序分配到对应的 preferred resource
 
 ## 验证步骤
 

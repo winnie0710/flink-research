@@ -166,9 +166,20 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
 
         for (Map.Entry<ResourceProfile, Integer> resourceRequirement :
                 totalResourceRequirements.getResourcesWithCount()) {
+            ResourceProfile resourceProfile = resourceRequirement.getKey();
+            int numberOfRequiredSlots = resourceRequirement.getValue();
+
+            // ✅ Simply pass ResourceProfile with preferredIp embedded
+            // The ResourceAllocationStrategy will extract preferredIp directly from ResourceProfile
+            String preferredIp = resourceProfile.getPreferredIp();
+
+            if (preferredIp != null && !preferredIp.isEmpty()) {
+                log.info("🎯 Creating ResourceRequirement with preferredIp: {}, count={}",
+                        preferredIp, numberOfRequiredSlots);
+            }
+
             currentResourceRequirements.add(
-                    ResourceRequirement.create(
-                            resourceRequirement.getKey(), resourceRequirement.getValue()));
+                    ResourceRequirement.create(resourceProfile, numberOfRequiredSlots));
         }
 
         return currentResourceRequirements;
@@ -181,14 +192,17 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
             TaskManagerGateway taskManagerGateway,
             long currentTime) {
 
-        log.debug("Received {} slot offers from TaskExecutor {}.", offers, taskManagerLocation);
+        log.info("📥 [OFFER] Received {} slots from TM {}",
+                offers.size(), taskManagerLocation.getResourceID());
 
-        return internalOfferSlots(
+        Collection<SlotOffer> accepted = internalOfferSlots(
                 offers,
                 taskManagerLocation,
                 taskManagerGateway,
                 currentTime,
                 this::matchWithOutstandingRequirement);
+
+        return accepted;
     }
 
     private Collection<SlotOffer> internalOfferSlots(
@@ -200,21 +214,34 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
         final Collection<SlotOffer> acceptedSlotOffers = new ArrayList<>();
         final Collection<AllocatedSlot> acceptedSlots = new ArrayList<>();
 
+        log.info("🎬 [SLOT BATCH] Processing {} offers from TM {} | Current fulfilled: {}",
+                offers.size(), taskManagerLocation.getResourceID(), fulfilledResourceRequirements);
+
         for (SlotOffer offer : offers) {
             if (slotPool.containsSlot(offer.getAllocationId())) {
                 // we have already accepted this offer
                 acceptedSlotOffers.add(offer);
             } else {
+                // Clean the preferredIp from slot offer's ResourceProfile
+                // The slot's source should be determined by TaskManagerLocation, not by preferredIp in ResourceProfile
+                ResourceProfile originalProfile = offer.getResourceProfile();
+                ResourceProfile cleanedProfile = ResourceProfile.newBuilder(originalProfile)
+                        .setPreferredIp(null)
+                        .build();
+
+                SlotOffer cleanedOffer = new SlotOffer(
+                        offer.getAllocationId(),
+                        offer.getSlotIndex(),
+                        cleanedProfile);
+
                 Optional<AllocatedSlot> acceptedSlot =
                         matchOfferWithOutstandingRequirements(
-                                offer, taskManagerLocation, taskManagerGateway, matchingCondition);
+                                cleanedOffer, taskManagerLocation, taskManagerGateway, matchingCondition);
                 if (acceptedSlot.isPresent()) {
                     acceptedSlotOffers.add(offer);
                     acceptedSlots.add(acceptedSlot.get());
                 } else {
-                    log.debug(
-                            "Could not match offer {} to any outstanding requirement.",
-                            offer.getAllocationId());
+                    log.warn("❌ [REJECT] Could not match slot {} to any requirement", offer.getAllocationId());
                 }
             }
         }
@@ -222,10 +249,13 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
         slotPool.addSlots(acceptedSlots, currentTime);
 
         if (!acceptedSlots.isEmpty()) {
-            log.debug(
-                    "Acquired new resources; new total acquired resources: {}",
-                    fulfilledResourceRequirements);
+            log.info("✅ [BATCH COMPLETE] Accepted {}/{} slots from TM {} | Fulfilled: {}",
+                    acceptedSlots.size(), offers.size(),
+                    taskManagerLocation.getResourceID(), fulfilledResourceRequirements);
             newSlotsListener.notifyNewSlotsAreAvailable(acceptedSlots);
+        } else {
+            log.info("🏁 [BATCH COMPLETE] Accepted 0/{} slots from TM {}",
+                    offers.size(), taskManagerLocation.getResourceID());
         }
 
         return acceptedSlotOffers;
@@ -273,17 +303,24 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
             TaskManagerGateway taskManagerGateway,
             Function<ResourceProfile, Optional<ResourceProfile>> matchingCondition) {
 
+        // Trust ResourceManager's allocation - simplified matching
         final Optional<ResourceProfile> match =
-                matchingCondition.apply(slotOffer.getResourceProfile());
+                matchWithOutstandingRequirementAndLocation(
+                        slotOffer.getResourceProfile(),
+                        taskManagerLocation);
 
         if (match.isPresent()) {
             final ResourceProfile matchedRequirement = match.get();
-            log.debug(
-                    "Matched slot offer {} to requirement {}.",
+
+            log.info("✅ [ACCEPT SLOT] Slot {} from TM {} → Requirement with preferredIp={}",
                     slotOffer.getAllocationId(),
-                    matchedRequirement);
+                    taskManagerLocation.getResourceID(),
+                    matchedRequirement.getPreferredIp());
 
             increaseAvailableResources(ResourceCounter.withResource(matchedRequirement, 1));
+
+            log.info("📊 [FULFILLED] Total requirements: {}, Fulfilled: {}",
+                    totalResourceRequirements, fulfilledResourceRequirements);
 
             final AllocatedSlot allocatedSlot =
                     createAllocatedSlot(slotOffer, taskManagerLocation, taskManagerGateway);
@@ -300,10 +337,75 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
 
     private Optional<ResourceProfile> matchWithOutstandingRequirement(
             ResourceProfile resourceProfile) {
-        return requirementMatcher.match(
+        log.info("🔍 [MATCH] Trying to match offered ResourceProfile: {}", resourceProfile);
+        log.info("🔍 [MATCH] Total requirements: {}", totalResourceRequirements);
+        log.info("🔍 [MATCH] Fulfilled requirements: {}", fulfilledResourceRequirements);
+
+        Optional<ResourceProfile> matched = requirementMatcher.match(
                 resourceProfile,
                 totalResourceRequirements,
                 fulfilledResourceRequirements::getResourceCount);
+
+        if (matched.isPresent()) {
+            log.info("✅ [MATCH] Successfully matched to requirement: {}", matched.get());
+        } else {
+            log.warn("❌ [MATCH] No matching requirement found for offered ResourceProfile: {}", resourceProfile);
+        }
+
+        return matched;
+    }
+
+    /**
+     * Match a slot offer with outstanding requirements.
+     *
+     * SIMPLIFIED APPROACH:
+     * Since ResourceManager's DefaultResourceAllocationStrategy already ensures that slots are allocated
+     * to the correct TaskManager based on preferredIp, we trust the allocation and simply:
+     * 1. Find a requirement with matching preferredIp (or no preferredIp restriction)
+     * 2. Check that it has sufficient resources (CPU, memory)
+     * 3. Check that it has unfulfilled count > 0
+     */
+    private Optional<ResourceProfile> matchWithOutstandingRequirementAndLocation(
+            ResourceProfile offeredResourceProfile,
+            TaskManagerLocation taskManagerLocation) {
+
+        String slotSourceTM = taskManagerLocation.getResourceID().toString();
+
+        // ResourceManager already allocated this slot to the correct TaskManager based on preferredIp.
+        // We just need to find the matching requirement and accept the slot.
+        for (Map.Entry<ResourceProfile, Integer> requirementEntry :
+                totalResourceRequirements.getResourcesWithCount()) {
+
+            ResourceProfile requirementProfile = requirementEntry.getKey();
+            int unfulfilled = requirementEntry.getValue() -
+                            fulfilledResourceRequirements.getResourceCount(requirementProfile);
+            String requiredPreferredIp = requirementProfile.getPreferredIp();
+
+            // Skip if no unfulfilled slots for this requirement
+            if (unfulfilled <= 0) {
+                continue;
+            }
+
+            // Skip if resource profile doesn't match (CPU, memory, etc.)
+            if (!offeredResourceProfile.isMatching(requirementProfile)) {
+                continue;
+            }
+
+            // ✅ SIMPLIFIED LOGIC: Trust ResourceManager's allocation
+            // Accept if: (1) no preferredIp restriction, OR (2) preferredIp matches TM
+            if (requiredPreferredIp == null || requiredPreferredIp.isEmpty() ||
+                requiredPreferredIp.equals(slotSourceTM)) {
+
+                log.debug("✅ [MATCH] TM {} → Requirement[preferredIp={}, unfulfilled={}]",
+                        slotSourceTM, requiredPreferredIp, unfulfilled);
+
+                return Optional.of(requirementProfile);
+            }
+        }
+
+        log.warn("❌ [NO MATCH] TM {} has no matching requirement (ResourceManager should have prevented this!)",
+                slotSourceTM);
+        return Optional.empty();
     }
 
     @VisibleForTesting
@@ -315,11 +417,19 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
             SlotOffer slotOffer,
             TaskManagerLocation taskManagerLocation,
             TaskManagerGateway taskManagerGateway) {
+
+        // IMPORTANT: The slot's ResourceProfile should include the TaskManager's ResourceID
+        // as preferredIp, so that later matching in DeclarativeSlotPoolBridge can correctly
+        // identify which TaskManager this slot is from.
+        ResourceProfile slotProfileWithLocation = ResourceProfile.newBuilder(slotOffer.getResourceProfile())
+                .setPreferredIp(taskManagerLocation.getResourceID().toString())
+                .build();
+
         return new AllocatedSlot(
                 slotOffer.getAllocationId(),
                 taskManagerLocation,
                 slotOffer.getSlotIndex(),
-                slotOffer.getResourceProfile(),
+                slotProfileWithLocation,  // Use profile with preferredIp set
                 taskManagerGateway);
     }
 
@@ -353,6 +463,14 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
         if (!previouslyMatchedResourceProfile.equals(requiredSlotProfile)) {
             // slots can be reserved for a requirement that is not in line with the mapping we
             // computed when the slot was offered, so we have to update the mapping
+
+            log.warn("⚠️ [MISMATCH] Slot {} was initially matched to preferredIp='{}' but is now being reserved for preferredIp='{}'",
+                    allocationId,
+                    previouslyMatchedResourceProfile.getPreferredIp(),
+                    requiredSlotProfile.getPreferredIp());
+            log.warn("⚠️ [MISMATCH] This indicates a matching error in DeclarativeSlotPoolBridge!");
+            log.warn("⚠️ [MISMATCH] Slot's TaskManager: {}", allocatedSlot.getTaskManagerLocation().getResourceID());
+
             updateSlotToRequirementProfileMapping(allocationId, requiredSlotProfile);
             if (previouslyMatchedResourceProfile == ResourceProfile.ANY) {
                 log.debug(
@@ -365,11 +483,9 @@ public class DefaultDeclarativeSlotPool implements DeclarativeSlotPool {
                 // If the previous profile was ANY, then the slot was accepted without
                 // being matched against a resource requirement; thus no update is needed.
 
-                log.debug(
-                        "Adjusting requirements because a slot was reserved for a different requirement than initially assumed. Slot={} assumedRequirement={} actualRequirement={}",
-                        allocationId,
-                        previouslyMatchedResourceProfile,
-                        requiredSlotProfile);
+                log.warn("⚠️ [ADJUST] Adjusting requirements: decreasing '{}' by 1, increasing '{}' by 1",
+                        requiredSlotProfile.getPreferredIp(),
+                        previouslyMatchedResourceProfile.getPreferredIp());
                 adjustRequirements(previouslyMatchedResourceProfile, requiredSlotProfile);
             }
         }

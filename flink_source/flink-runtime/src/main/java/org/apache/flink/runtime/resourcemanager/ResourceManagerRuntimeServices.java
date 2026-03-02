@@ -25,6 +25,7 @@ import org.apache.flink.runtime.resourcemanager.slotmanager.DefaultResourceTrack
 import org.apache.flink.runtime.resourcemanager.slotmanager.DefaultSlotStatusSyncer;
 import org.apache.flink.runtime.resourcemanager.slotmanager.FineGrainedSlotManager;
 import org.apache.flink.runtime.resourcemanager.slotmanager.FineGrainedTaskManagerTracker;
+import org.apache.flink.runtime.resourcemanager.slotmanager.MigrationAwareResourceAllocationStrategy;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManager;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManagerConfiguration;
 import org.apache.flink.runtime.resourcemanager.slotmanager.SlotManagerUtils;

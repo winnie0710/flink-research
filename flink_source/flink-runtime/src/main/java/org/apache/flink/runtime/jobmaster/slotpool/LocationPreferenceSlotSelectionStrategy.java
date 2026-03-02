@@ -71,10 +71,12 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
             @Nonnull Collection<TaskManagerLocation> locationPreferences,
             @Nonnull ResourceProfile resourceProfile) {
 
+        LOG.info("🔍 selectWithLocationPreference called with ResourceProfile: {}", resourceProfile);
+
         // Check if there's a target resource-id (stored in preferredIp field) in the resource profile
         final String targetResourceId = resourceProfile.getPreferredIp();
 
-        LOG.debug("LocationPreferenceSlotSelection: ResourceProfile has targetResourceId: {}", targetResourceId);
+        LOG.info("🔍 ResourceProfile.getPreferredIp() returned: {}", targetResourceId);
 
         // If target resource-id is specified, try to find an exact match first
         if (targetResourceId != null) {
@@ -85,8 +87,10 @@ public abstract class LocationPreferenceSlotSelectionStrategy implements SlotSel
                 LOG.info("LocationPreferenceSlotSelection: ✓ Successfully allocated slot with target Resource-ID: {}", targetResourceId);
                 return resourceIdMatchedSlot;
             }
-            // If no exact resource-id match found, fall through to normal location preference logic
-            LOG.warn("LocationPreferenceSlotSelection: ✗ Failed to find slot with target Resource-ID: {}, falling back to normal allocation", targetResourceId);
+            // STRICT MODE: If preferredIp is specified but no exact match found, return empty
+            // This prevents cross-TaskManager matching and ensures migration plan is respected
+            LOG.warn("LocationPreferenceSlotSelection: ✗ Failed to find slot with target Resource-ID: {}, STRICT MODE - NOT falling back to other TaskManagers", targetResourceId);
+            return Optional.empty();
         }
 
         // we build up two indexes, one for resource id and one for host names of the preferred

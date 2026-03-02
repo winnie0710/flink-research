@@ -18,4 +18,4 @@ cluster.fine-grained-resource-management.enabled: false
 cluster.evenly-spread-out-slots: false
 state.backend: hashmap
 state.checkpoints.dir: file:///opt/flink/checkpoints
-taskmanager.resource-id: tm-20c-2-net
+taskmanager.resource-id: tm_20c_2_net

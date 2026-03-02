@@ -18,9 +18,13 @@
 package org.apache.flink.runtime.slots;
 
 import org.apache.flink.runtime.clusterframework.types.ResourceProfile;
+import org.apache.flink.runtime.taskmanager.TaskManagerLocation;
 import org.apache.flink.util.Preconditions;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.Objects;
 
 /** Represents the number of required resources for a specific {@link ResourceProfile}. */
@@ -32,12 +36,20 @@ public class ResourceRequirement implements Serializable {
 
     private final int numberOfRequiredSlots;
 
-    private ResourceRequirement(ResourceProfile resourceProfile, int numberOfRequiredSlots) {
+    private final Collection<TaskManagerLocation> preferredLocations;
+
+    private ResourceRequirement(
+            ResourceProfile resourceProfile,
+            int numberOfRequiredSlots,
+            Collection<TaskManagerLocation> preferredLocations) {
         Preconditions.checkNotNull(resourceProfile);
         Preconditions.checkArgument(numberOfRequiredSlots > 0);
 
         this.resourceProfile = resourceProfile;
         this.numberOfRequiredSlots = numberOfRequiredSlots;
+        this.preferredLocations = preferredLocations != null
+                ? new ArrayList<>(preferredLocations)
+                : Collections.emptyList();
     }
 
     public ResourceProfile getResourceProfile() {
@@ -48,9 +60,20 @@ public class ResourceRequirement implements Serializable {
         return numberOfRequiredSlots;
     }
 
+    public Collection<TaskManagerLocation> getPreferredLocations() {
+        return preferredLocations;
+    }
+
     public static ResourceRequirement create(
             ResourceProfile resourceProfile, int numberOfRequiredSlots) {
-        return new ResourceRequirement(resourceProfile, numberOfRequiredSlots);
+        return new ResourceRequirement(resourceProfile, numberOfRequiredSlots, Collections.emptyList());
+    }
+
+    public static ResourceRequirement createWithPreferredLocations(
+            ResourceProfile resourceProfile,
+            int numberOfRequiredSlots,
+            Collection<TaskManagerLocation> preferredLocations) {
+        return new ResourceRequirement(resourceProfile, numberOfRequiredSlots, preferredLocations);
     }
 
     @Override

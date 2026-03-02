@@ -285,7 +285,9 @@ public class ResourceProfile implements Serializable {
             return true;
         }
 
-        if (this.equals(required)) {
+        // ✅ Use equalsIgnoringPreferredIp for slot matching
+        // PreferredIp is only a hint for allocation, not a requirement for slot acceptance
+        if (this.equalsIgnoringPreferredIp(required)) {
             return true;
         }
 
@@ -386,6 +388,28 @@ public class ResourceProfile implements Serializable {
                     && Objects.equals(preferredIp, that.preferredIp);
         }
         return false;
+    }
+
+    /**
+     * Check if this profile matches another profile, ignoring preferredIp.
+     * This is useful for slot matching where preferredIp is only a hint for allocation,
+     * not a requirement for slot acceptance.
+     *
+     * @param other the other ResourceProfile to compare with
+     * @return true if all fields except preferredIp are equal
+     */
+    public boolean equalsIgnoringPreferredIp(ResourceProfile other) {
+        if (other == this) {
+            return true;
+        } else if (other == null) {
+            return false;
+        }
+        return Objects.equals(this.cpuCores, other.cpuCores)
+                && Objects.equals(taskHeapMemory, other.taskHeapMemory)
+                && Objects.equals(taskOffHeapMemory, other.taskOffHeapMemory)
+                && Objects.equals(managedMemory, other.managedMemory)
+                && Objects.equals(networkMemory, other.networkMemory)
+                && Objects.equals(extendedResources, other.extendedResources);
     }
 
     /**

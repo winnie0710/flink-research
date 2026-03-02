@@ -194,6 +194,7 @@ class FlinkDetector:
         根據過載的 subtask 產生遷移計畫
         選擇負載最低的 TaskManager 作為目標
         返回格式: { "subtask_id": "target_resource_id", ... }
+        包含所有 subtask（需要遷移的會分配到新的 TM，不需要遷移的維持原 TM）
         """
         tm_info = self.get_taskmanager_info()
         current_locations = self.get_subtask_locations()
@@ -207,24 +208,34 @@ class FlinkDetector:
 
         migration_plan = {}
 
-        for subtask_id, current_load in overloaded_subtasks:
-            current_resource_id = current_locations.get(subtask_id, 'unknown')
+        # 建立需要遷移的 subtask 集合
+        overloaded_subtask_ids = {subtask_id for subtask_id, _ in overloaded_subtasks}
 
-            # 找到負載最低且不是當前 resource_id 的 TM
-            target_resource_id = None
-            target_info = None
+        # 處理所有 subtask
+        for subtask_id, current_resource_id in current_locations.items():
+            if subtask_id in overloaded_subtask_ids:
+                # 需要遷移的 subtask：找到負載最低且不是當前 resource_id 的 TM
+                target_resource_id = None
+                target_info = None
 
-            for resource_id, info in sorted_tms:
-                if resource_id != current_resource_id:
-                    target_resource_id = resource_id
-                    target_info = info
-                    break
+                for resource_id, info in sorted_tms:
+                    if resource_id != current_resource_id:
+                        target_resource_id = resource_id
+                        target_info = info
+                        break
 
-            if target_resource_id and target_info:
-                migration_plan[subtask_id] = target_resource_id
-                print(f"📋 計畫遷移: {subtask_id}")
-                print(f"   從: {current_resource_id} -> 到: {target_resource_id}")
-                print(f"   目標 host: {target_info['host']}, 負載: {target_info['load']:.1f}")
+                if target_resource_id and target_info:
+                    migration_plan[subtask_id] = target_resource_id
+                    print(f"📋 計畫遷移: {subtask_id}")
+                    print(f"   從: {current_resource_id} -> 到: {target_resource_id}")
+                    print(f"   目標 host: {target_info['host']}, 負載: {target_info['load']:.1f}")
+            else:
+                # 不需要遷移的 subtask：維持在原本的 TaskManager
+                migration_plan[subtask_id] = current_resource_id
+
+        print(f"\n✅ 遷移計畫包含 {len(migration_plan)} 個 subtask")
+        print(f"   需要遷移: {len(overloaded_subtask_ids)} 個")
+        print(f"   維持原位: {len(migration_plan) - len(overloaded_subtask_ids)} 個")
 
         return migration_plan
 

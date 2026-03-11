@@ -4,9 +4,20 @@ import json
 import time
 import os
 import subprocess
-import re
 
-class FlinkDetector:
+def format_bytes(bytes_value):
+    """將字節轉換為人類可讀的格式"""
+    if bytes_value == 0:
+        return "0 B"
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    unit_index = 0
+    value = float(bytes_value)
+    while value >= 1024 and unit_index < len(units) - 1:
+        value /= 1024
+        unit_index += 1
+    return f"{value:.2f} {units[unit_index]}"
+
+class FlinkPropose:
     def __init__(self, prometheus_url="http://localhost:9090",
                  flink_rest_url="http://localhost:8081",
                  migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
@@ -70,9 +81,38 @@ class FlinkDetector:
             print(f"⚠️ 連線錯誤: {e}")
             return {}
 
+    def get_subtask_state_sizes(self):
+        """
+        查詢每個 subtask 的狀態大小（用於評估遷移代價）
+        返回: { "task_name": { subtask_index: state_size_bytes, ... }, ... }
+        """
+        try:
+            # Flink 狀態大小指標（可能的指標名稱）
+            state_metrics = [
+                'flink_taskmanager_job_task_operator_currentStateSize',  # 當前狀態大小
+                'flink_taskmanager_job_task_operator_lastCheckpointSize',  # 最後 checkpoint 大小
+                'flink_taskmanager_job_task_checkpointStartDelayNanos',  # 如果上面沒有，嘗試其他指標
+            ]
+
+            state_size_map = {}
+
+            # 嘗試不同的狀態指標
+            for metric in state_metrics:
+                result = self.query_metric_by_task(metric)
+                if result:
+                    state_size_map = result
+                    print(f"✅ 使用指標 {metric} 獲取狀態大小")
+                    break
+
+            return state_size_map
+
+        except Exception as e:
+            print(f"⚠️ 獲取狀態大小失敗: {e}")
+            return {}
+
     def detect_bottleneck(self):
         """
-        CAOM Bottleneck Detection: Identify all potential bottleneck operators in a single pass
+        My propose Bottleneck Detection: Identify all potential bottleneck operators in a single pass
         Uses backpressure recovery to calculate actual input rates and max processing capacity
         """
         # Query all required metrics
@@ -83,6 +123,8 @@ class FlinkDetector:
         # 除了 In，也要抓取 Out 指標
         rate_in_map = self.query_metric_by_task('flink_taskmanager_job_task_numRecordsInPerSecond')
         rate_out_map = self.query_metric_by_task('flink_taskmanager_job_task_numRecordsOutPerSecond')
+        # 獲取狀態大小（用於遷移代價評估）
+        state_size_map = self.get_subtask_state_sizes()
 
         if not busy_data_map:
             return []
@@ -105,6 +147,9 @@ class FlinkDetector:
                 else:
                     observed_rate = rate_in_map.get(task_name, {}).get(idx, 0)
 
+                # 獲取狀態大小（bytes）
+                state_size = state_size_map.get(task_name, {}).get(idx, 0)
+
                 subtask_id = f"{task_name}_{idx}"
 
                 task_info[subtask_id] = {
@@ -116,7 +161,8 @@ class FlinkDetector:
                     "observed_rate": observed_rate,
                     "actual_input_rate": 0.0,
                     "max_capacity": 0.0,
-                    "is_bottleneck": False
+                    "is_bottleneck": False,
+                    "state_size": state_size  # bytes
                 }
 
         # Step A: Recover actual source rate
@@ -177,12 +223,15 @@ class FlinkDetector:
                     # λ̂_i = λ̂_upstream × (observed_rate_i / observed_rate_upstream)
                     task_info[subtask_id]["actual_input_rate"] = upstream_avg_actual * (observed_rate / upstream_avg_observed) if upstream_avg_observed > 0 else observed_rate
 
-        # Step C: Calculate max capacity for each subtask
+        # Step C & D: Calculate max capacity and identify bottlenecks
+        bottleneck_subtasks = []
+
         for subtask_id, info in task_info.items():
             T_busy = info["T_busy"]
             T_bp = info["T_bp"]
             T_idle = info["T_idle"]
             observed_rate = info["observed_rate"]
+            actual_input_rate = info["actual_input_rate"]
 
             # Calculate max processing capacity: λ^a = λ + ((T_bp + T_idle) / T_busy) × λ
             if T_busy > 0 and observed_rate > 0:
@@ -191,46 +240,26 @@ class FlinkDetector:
                 max_capacity = observed_rate
 
             info["max_capacity"] = max_capacity
-            info["is_bottleneck"] = False  # Will be set at operator level
 
-        # Step D: Identify bottlenecks at OPERATOR level (not individual subtask level)
-        bottleneck_subtasks = []
-        bottleneck_operators = set()
-
-        for op_name in ordered_operators:
-            subtasks = operator_groups[op_name]
-
-            # Sum actual_input_rate and max_capacity across all subtasks of this operator
-            total_actual_input_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks)
-            total_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks)
-
-            # Operator-level bottleneck check: total_actual_input_rate > total_max_capacity
-            if total_actual_input_rate > total_max_capacity and total_max_capacity > 0:
-                bottleneck_operators.add(op_name)
-
-                # Mark ALL subtasks of this operator as bottleneck
-                for subtask_id in subtasks:
-                    task_info[subtask_id]["is_bottleneck"] = True
-                    actual_rate = task_info[subtask_id]["actual_input_rate"]
-                    max_cap = task_info[subtask_id]["max_capacity"]
-                    bottleneck_subtasks.append((subtask_id, actual_rate, max_cap))
+            # Identify bottleneck: actual_input_rate > max_capacity
+            if actual_input_rate > max_capacity and max_capacity > 0:
+                info["is_bottleneck"] = True
+                bottleneck_subtasks.append((subtask_id, actual_input_rate, max_capacity))
 
         # Generate report
         report_list = []
         for op_name in ordered_operators:
             subtasks = operator_groups[op_name]
 
-            # Aggregate statistics for the operator (use TOTAL not average for bottleneck detection)
+            # Aggregate statistics for the operator
             bottleneck_count = sum(1 for st in subtasks if task_info[st]["is_bottleneck"])
-            total_actual_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks)
-            total_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks)
-            avg_actual_rate = total_actual_rate / len(subtasks) if subtasks else 0
-            avg_max_capacity = total_max_capacity / len(subtasks) if subtasks else 0
+            avg_actual_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks) / len(subtasks)
+            avg_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks) / len(subtasks)
             max_busy = max(task_info[st]["T_busy"] * 1000 for st in subtasks)  # Convert back to ms
             max_bp = max(task_info[st]["T_bp"] * 1000 for st in subtasks)
 
-            # Status determination (based on operator-level bottleneck detection)
-            if op_name in bottleneck_operators:
+            # Status determination
+            if bottleneck_count > 0:
                 status = "🔴 BOTTLENECK"
             elif max_busy > 700:
                 status = "🟠 HIGH_LOAD"
@@ -243,14 +272,11 @@ class FlinkDetector:
                 "task_name": op_name,
                 "status": status,
                 "bottleneck_count": bottleneck_count,
-                "total_actual_rate": round(total_actual_rate, 2),
-                "total_max_capacity": round(total_max_capacity, 2),
                 "avg_actual_rate": round(avg_actual_rate, 2),
                 "avg_max_capacity": round(avg_max_capacity, 2),
                 "max_busy": round(max_busy, 1),
                 "max_bp": round(max_bp, 1),
-                "subtasks": subtasks,
-                "is_bottleneck_operator": op_name in bottleneck_operators
+                "subtasks": subtasks
             })
 
         # Store bottleneck info for migration planning
@@ -303,7 +329,7 @@ class FlinkDetector:
                         "cpu_limit": cpu_limit
                     }
 
-            # Step 2: Add any missing TMs from cpu_capacity_map with zero load
+            # [有問題] Step 2: Add any missing TMs from cpu_capacity_map with zero load
             # This ensures idle/registered TMs are included as migration targets
             for resource_id, cpu_limit in cpu_capacity_map.items():
                 if resource_id not in tm_info:
@@ -423,17 +449,23 @@ class FlinkDetector:
             print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, CPU limit: {cpu_limit}")
 
         # Sort bottleneck subtasks by actual_input_rate (descending - heavy first)
+        # Also collect state size for migration cost evaluation
         bottleneck_list = []
         for subtask_id, actual_rate in overloaded_subtasks:
             if hasattr(self, '_task_info') and subtask_id in self._task_info:
                 task_detail = self._task_info[subtask_id]
-                bottleneck_list.append((subtask_id, task_detail['actual_input_rate'], task_detail['T_busy']))
+                bottleneck_list.append((
+                    subtask_id,
+                    task_detail['actual_input_rate'],
+                    task_detail['T_busy'],
+                    task_detail.get('state_size', 0)  # 狀態大小 (bytes)
+                ))
             else:
-                bottleneck_list.append((subtask_id, actual_rate, 0))
+                bottleneck_list.append((subtask_id, actual_rate, 0, 0))
 
         # Sort by actual_input_rate descending (heavy first)
         bottleneck_list.sort(key=lambda x: x[1], reverse=True)
-        bottleneck_subtask_ids = {subtask_id for subtask_id, _, _ in bottleneck_list}
+        bottleneck_subtask_ids = {subtask_id for subtask_id, _, _, _ in bottleneck_list}
 
         print(f"\n🔍 檢測到 {len(bottleneck_subtask_ids)} 個瓶頸 Subtask (Heavy-First Order)")
 
@@ -446,7 +478,7 @@ class FlinkDetector:
         tm_load_tracker = {rid: info['current_load'] for rid, info in tm_info.items()}
 
         # Process bottleneck subtasks (heavy first)
-        for subtask_id, actual_rate, busy_time in bottleneck_list:
+        for subtask_id, actual_rate, busy_time, state_size in bottleneck_list:
             current_resource_id = current_locations.get(subtask_id, 'unknown')
 
             if current_resource_id not in tm_info:
@@ -455,6 +487,9 @@ class FlinkDetector:
 
             # Calculate potential load contribution (use busy_time as proxy)
             potential_new_load = busy_time if busy_time > 0 else 100
+
+            # Migration cost based on state size (for display purposes)
+            state_size_mb = state_size / (1024 * 1024) if state_size > 0 else 0
 
             # Find best target TM
             target_resource_id = None
@@ -502,10 +537,14 @@ class FlinkDetector:
                     print(f"   Slots: {slot_occupancy[target_resource_id]}/{MAX_SLOTS_PER_TM}")
                     print(f"   實際輸入: {actual_rate:.2f} rec/s, 最大容量: {max_capacity:.2f} rec/s")
                     print(f"   過載程度: {overload_pct:.1f}%")
+                    if state_size > 0:
+                        print(f"   💾 State 大小: {format_bytes(state_size)} (遷移代價)")
                 else:
                     print(f"📋 計畫遷移: {subtask_id}")
                     print(f"   從: {current_resource_id} -> 到: {target_resource_id}")
                     print(f"   Normalized Load: {best_normalized_load:.2f}, Slots: {slot_occupancy[target_resource_id]}/{MAX_SLOTS_PER_TM}")
+                    if state_size > 0:
+                        print(f"   💾 State 大小: {format_bytes(state_size)}")
             else:
                 # No suitable target found, keep in place
                 print(f"⚠️ 無可用 TM 遷移: {subtask_id} (所有 TM 已達 slot 上限或負載過高), 維持原位")
@@ -664,17 +703,8 @@ class FlinkDetector:
             print(f"❌ 提交失敗: {e}")
             return None
 
-        except subprocess.TimeoutExpired:
-            print(f"⚠️ 重新提交 Job 超時 (超過 60 秒)")
-            print(f"   💡 Job 可能已經成功提交，請檢查 Flink Web UI")
-            print(f"   💡 如果 Job 正在運行，可以忽略此錯誤")
-            # 即使超時也返回 True，因為 Job 可能已經成功提交
-            return True
-        except Exception as e:
-            print(f"❌ 重新提交 Job 失敗: {e}")
-            return None
 
-    def trigger_migration(self, migration_plan, job_id=None, auto_restart=True):
+    def trigger_migration(self, migration_plan, job_id=None, auto_restart=False):
         """
         觸發完整的遷移流程
 
@@ -702,43 +732,18 @@ class FlinkDetector:
                 return False
             job_id = running_jobs[0]  # 使用第一個 Job
 
-        start_migration = time.perf_counter()
         # 3. Stop with Savepoint
-        stop_start = time.perf_counter()
         savepoint_path = self.stop_job_with_savepoint(job_id)
-        stop_end = time.perf_counter()
         if not savepoint_path:
             return False
 
         # 4. 等待 Job 完全停止
-        wait_start = time.perf_counter()
         print("⏳ 等待 Job 停止...")
-        time.sleep(5)
-        wait_end = time.perf_counter()
+        time.sleep(2)
 
         # 5. 自動從 Savepoint 重新提交 Job
-        restart_start = time.perf_counter()
         if auto_restart:
             new_job_id = self.submit_job_from_savepoint(savepoint_path)
-            restart_end = time.perf_counter()
-            # --- 延遲測量結束 ---
-            end_migration = time.perf_counter()
-
-            # 計算各階段耗時
-            savepoint_latency = stop_end - stop_start
-            restart_latency = restart_end - restart_start
-            total_downtime = end_migration - start_migration
-
-            print("\n" + "="*40)
-            print("📊 Flink 遷移延遲分析報告")
-            print("-" * 40)
-            print(f"🔹 Savepoint & 停止耗時: {savepoint_latency:.3f} 秒")
-            print(f"🔹 系統等待 (Sleep) 耗時: {wait_end - wait_start:.3f} 秒")
-            print(f"🔹 重新啟動提交耗時:      {restart_latency:.3f} 秒")
-            print("-" * 40)
-            print(f"🔥 總服務中斷時間 (Downtime): {total_downtime:.3f} 秒")
-            print("="*40)
-
             if new_job_id:
                 print(f"✅ 遷移流程完成！新 Job 已啟動")
                 self.last_migration_time = current_time

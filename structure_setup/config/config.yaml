@@ -4,9 +4,9 @@ blob:
 taskmanager:
   memory:
     process:
-      size: 4g
+      size: 8g
   bind-host: 0.0.0.0
-  numberOfTaskSlots: 10
+  numberOfTaskSlots: 6
 jobmanager:
   execution:
     failover-strategy: region

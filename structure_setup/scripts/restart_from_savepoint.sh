@@ -5,7 +5,7 @@ set -e
 
 if [ -z "$1" ]; then
     echo "Usage: $0 <savepoint-path>"
-    echo "Example: $0 file:/opt/flink/savepoints/savepoint-6b7904-c4d05d05ec99"
+    echo "Example: $0 file:/opt/flink/savepoints/savepoint-97dee6-f32217f615cb"
     exit 1
 fi
 

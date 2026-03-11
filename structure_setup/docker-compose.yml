@@ -99,7 +99,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.5'
+          cpus: '2'
 
   # TM B: 2 核心 (模擬網路瓶頸)
   tm-20c-2-net:
@@ -130,7 +130,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1.5'
+          cpus: '2'
 
   # TM C: 1 核心 (模擬 CPU 瓶頸)
   tm-10c-3-cpu:
@@ -161,7 +161,7 @@ services:
         limits:
           cpus: '1'
 
-  # TM D: 1 核心
+  # TM D: 1 核心  (模擬網路瓶頸)
   tm-20c-4:
     build:
       context: .
@@ -169,6 +169,8 @@ services:
     hostname: tm-20c-4
     container_name: tm-20c-4
     command: taskmanager
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./config/tm-20c-4-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml

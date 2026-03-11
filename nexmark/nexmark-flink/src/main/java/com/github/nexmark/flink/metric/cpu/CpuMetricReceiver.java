@@ -101,6 +101,14 @@ public class CpuMetricReceiver implements Closeable {
 		return cpuMetrics.size();
 	}
 
+	/**
+	 * 清空舊的 CPU metrics，用於 job 執行前重置狀態
+	 */
+	public void clearMetrics() {
+		LOG.info("Clearing CPU metrics. Previous metrics count: {}", cpuMetrics.size());
+		cpuMetrics.clear();
+	}
+
 	@Override
 	public void close() {
 		try {

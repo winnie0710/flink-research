@@ -234,6 +234,9 @@ public class MetricReporter {
 
 	public void close() {
 		service.shutdownNow();
+		// 清空狀態以避免影響下一次 job 執行
+		metrics.clear();
+		error = null;
 	}
 
 	private class MetricCollector implements Runnable {

@@ -209,6 +209,10 @@ public class BenchmarkIsoQ7 {
             }
             workload.validateWorkload(monitorDuration);
 
+            // 在每次執行查詢前清空舊的 CPU metrics
+            System.out.println("Clearing previous CPU metrics before starting query: " + queryName);
+            cpuMetricReceiver.clearMetrics();
+
             MetricReporter reporter = new MetricReporter(
                     flinkRestClient,
                     cpuMetricReceiver,

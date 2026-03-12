@@ -31,7 +31,7 @@ services:
       # --- [新增] 防止硬碟爆滿的自動清理設定 ---
       KAFKA_LOG_RETENTION_BYTES: 1073741824     # 限制單一 Partition 最大 1GB
       KAFKA_LOG_RETENTION_HOURS: 1              # 限制時間 1 小時
-      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 180000 # 每 3 分鐘檢查一次
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 120000 # 每 3 分鐘檢查一次
       KAFKA_LOG_SEGMENT_BYTES: 268435456        # Segment 切小一點方便清理
     volumes:
       - kafka_data:/var/lib/kafka/data

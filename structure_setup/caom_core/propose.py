@@ -1,5 +1,6 @@
 import requests
 # import numpy as np
+import csv
 import json
 import time
 import os
@@ -53,8 +54,8 @@ def match_vertex_to_task_name(vertex_name, task_name):
 
 class FlinkPropose:
     # Network bandwidth limit: 50Mbit/s = 6.25MB/s
-    BANDWIDTH_LIMIT_BYTES_PER_SEC = 12500000  # 100Mbit/s in bytes
-    AVERAGE_RECORD_SIZE = 100  # bytes per record (default assumption)
+    BANDWIDTH_LIMIT_BYTES_PER_SEC = 125000000  # 100Mbit/s in bytes
+    AVERAGE_RECORD_SIZE = 100  # bytes per record (default assumption 確實一筆資料大約 100 byte)
 
     def __init__(self, prometheus_url="http://localhost:9090",
                  flink_rest_url="http://localhost:8081",
@@ -262,7 +263,7 @@ class FlinkPropose:
         bp_data_map = self.query_metric_by_task('flink_taskmanager_job_task_backPressuredTimeMsPerSecond')
         idle_data_map = self.query_metric_by_task('flink_taskmanager_job_task_idleTimeMsPerSecond')
         rate_data_map = self.query_metric_by_task('flink_taskmanager_job_task_numRecordsInPerSecond')
-        # 除了 In，也要抓取 Out 指標
+        # 除了 In，也要抓取 Out 指標 (給source用)
         rate_in_map = self.query_metric_by_task('flink_taskmanager_job_task_numRecordsInPerSecond')
         rate_out_map = self.query_metric_by_task('flink_taskmanager_job_task_numRecordsOutPerSecond')
         # 獲取狀態大小（用於遷移代價評估）
@@ -317,7 +318,8 @@ class FlinkPropose:
                     "state_size": state_size  # bytes
                 }
 
-        # Step A: Recover actual source rate
+        # Step A: Recover actual source rate 由 source 開始 其他用 BFS 搭配 out/in 推算
+        # TODO source 用背壓還原後過大 真的直接這樣算嗎？
         # Identify source operators (those with "Source" in name)
         source_tasks = {k: v for k, v in task_info.items() if "Source" in v["task_name"]}
 
@@ -327,9 +329,10 @@ class FlinkPropose:
             observed_rate = info["observed_rate"]
 
             if T_busy > 0:
-                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)
+                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)  只考慮被「反壓」擋住的資料。
                 actual_source_rate = observed_rate * (1 + T_bp / T_busy)
                 info["actual_input_rate"] = actual_source_rate
+                print(f" 過高 Source: {subtask_id} actual_input_rate = {actual_source_rate}")
             else:
                 info["actual_input_rate"] = observed_rate
 
@@ -358,6 +361,8 @@ class FlinkPropose:
                 ordered_operators.append(op_name)
 
         # Propagate actual input rates downstream
+        # TODO : 建立「多對多」的拓撲視圖 ，針對多輸入算子（如 Window_Join 同時接收來自兩個算子流的情況），目前的公式確實會失效，因為它假設了「一對一」的上下游關係。
+
         for i in range(1, len(ordered_operators)):
             upstream_op = ordered_operators[i - 1]
             current_op = ordered_operators[i]
@@ -373,7 +378,9 @@ class FlinkPropose:
                 for subtask_id in current_subtasks:
                     observed_rate = task_info[subtask_id]["observed_rate"]
                     # λ̂_i = λ̂_upstream × (observed_rate_i / observed_rate_upstream)
+                    ratio = observed_rate / upstream_avg_observed if upstream_avg_observed > 0 else 1
                     task_info[subtask_id]["actual_input_rate"] = upstream_avg_actual * (observed_rate / upstream_avg_observed) if upstream_avg_observed > 0 else observed_rate
+                    print(f"   {upstream_op} -> {current_op}: {subtask_id}, ratio= {ratio} - actual_input_rate = {task_info[subtask_id]['actual_input_rate']}")
 
         # Step C: Calculate max capacity for all subtasks
         for subtask_id, info in task_info.items():
@@ -382,9 +389,9 @@ class FlinkPropose:
             T_idle = info["T_idle"]
             observed_rate = info["observed_rate"]
 
-            # Calculate max processing capacity: λ^a = λ + ((T_bp + T_idle) / T_busy) × λ
+            # Calculate max processing capacity: λ^a = (1 + (T_bp + T_idle) / T_busy) × λ   考慮被「反壓」與「空閒」浪費掉的所有潛力。
             if T_busy > 0 and observed_rate > 0:
-                max_capacity = observed_rate + ((T_bp + T_idle) / T_busy) * observed_rate
+                max_capacity = (1 + (T_bp + T_idle) / T_busy) * observed_rate
             else:
                 max_capacity = observed_rate
 
@@ -396,7 +403,7 @@ class FlinkPropose:
 
         # Calculate total network traffic per TaskManager
         tm_network_traffic = {}  # {tm_resource_id: total_bytes_per_sec}
-
+        # 遍歷所有 subtask ，找出其所在的 tm_resource_id 後，將流量累加到該 TM 的總值中。
         for subtask_id, info in task_info.items():
             actual_input_rate = info["actual_input_rate"]
             tm_resource_id = subtask_locations.get(subtask_id, "unknown")
@@ -405,9 +412,11 @@ class FlinkPropose:
                 # Calculate network traffic: rate × avg_record_size
                 traffic_bytes = actual_input_rate * self.AVERAGE_RECORD_SIZE
 
+
                 if tm_resource_id not in tm_network_traffic:
                     tm_network_traffic[tm_resource_id] = 0.0
                 tm_network_traffic[tm_resource_id] += traffic_bytes
+                print(f"Traffic update for TM {tm_resource_id}:{subtask_id} with {traffic_bytes} bytes")
 
         # Determine which TMs have reached bandwidth limit
         tm_bandwidth_saturated = {}
@@ -527,9 +536,9 @@ class FlinkPropose:
             state_size = task_info.get('state_size', 0)
             state_size_mb = state_size / (1024 * 1024)
 
-            # Calculate Individual Migration Cost: D_mig = 15 + state_size/(10 MB/s)
+            # Calculate Individual Migration Cost: D_mig = 4 + state_size/(10 MB/s)
             # Note: state_size in bytes, so divide by (10 * 1024 * 1024) for 10 MB/s
-            D_mig = 15 + (state_size / (10 * 1024 * 1024))
+            D_mig = 4 + (state_size / (10 * 1024 * 1024))
 
             # Calculate Individual Bottleneck Cost: D_bot = overload_ratio × 30
             if max_capacity > 0:
@@ -570,10 +579,10 @@ class FlinkPropose:
         total_bottleneck_cost = sum(c['D_bot'] for c in candidate_details)
 
         # Calculate Total Migration Overhead:
-        # Shared fixed cost (15s) + max recovery time (max state_size / 10 MB/s)
+        # Shared fixed cost (4s) + max recovery time (max state_size / 10 MB/s)
         max_state_size = max(c['state_size'] for c in candidate_details)
         max_recovery_time = max_state_size / (10 * 1024 * 1024)  # in seconds
-        total_migration_overhead = 15 + max_recovery_time
+        total_migration_overhead = 4 + max_recovery_time
 
         # Apply 20% buffer to prevent thrashing
         threshold_overhead = total_migration_overhead * 1.2
@@ -583,7 +592,7 @@ class FlinkPropose:
 
         print(f"總瓶頸成本 (Total D_bot):           {total_bottleneck_cost:.2f}s")
         print(f"總遷移開銷 (Shared Overhead):       {total_migration_overhead:.2f}s")
-        print(f"  ├─ 固定成本 (Fixed):               15.00s")
+        print(f"  ├─ 固定成本 (Fixed):               4.00s")
         print(f"  └─ 最大恢復時間 (Max Recovery):    {max_recovery_time:.2f}s (State: {max_state_size / (1024*1024):.2f} MB)")
         print(f"觸發閾值 (1.2x Overhead):           {threshold_overhead:.2f}s")
         print(f"成本比率 (Cost Ratio):              {total_bottleneck_cost / total_migration_overhead:.2f}x")
@@ -692,12 +701,15 @@ class FlinkPropose:
     def get_taskmanager_info(self):
         """
         查詢所有 TaskManager 的資訊和當前負載，包含 CPU 容量限制
-        使用 Prometheus 獲取負載資訊，並自動添加已註冊但空閒的 TM
+        採用「Flink REST API」與「Prometheus」雙路並行方案：
+        1. 動態發現：透過 Flink REST API 獲取所有已註冊的 TaskManager
+        2. 負載獲取：透過 Prometheus 查詢實際負載 (busyTime)
+        3. 靜態補全：使用 cpu_capacity_map 匹配 CPU 限制
         返回: { resource_id: {"host": "192.168.1.100", "current_load": 0.5, "cpu_limit": 1.5}, ... }
         """
         try:
             # CPU capacity mapping based on docker-compose.yml
-            # Note: Prometheus metrics use underscore format (tm_20c_1) not hyphen (tm-20c-1)
+            # Note: resourceId 格式可能是 tm-20c-1 或 tm_20c_1，需要兼容兩種格式
             cpu_capacity_map = {
                 "tm_20c_1": 2.0,
                 "tm_20c_2_net": 2.0,
@@ -705,75 +717,129 @@ class FlinkPropose:
                 "tm_20c_4": 1.0
             }
 
-            # Step 1: Query Prometheus for load information from busy TMs
-            query = 'avg(flink_taskmanager_job_task_busyTimeMsPerSecond) by (resource_id, tm_id, host)'
-            response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query})
-            data = response.json()
-
             tm_info = {}
 
-            if data['status'] == 'success':
-                for r in data['data']['result']:
-                    # 優先使用 resource_id，如果沒有則使用 tm_id
-                    resource_id = r['metric'].get('resource_id') or r['metric'].get('tm_id', 'unknown')
-                    host = r['metric'].get('host', 'unknown')
+            # ===== Step 1: 動態發現 - 透過 Flink REST API 獲取所有 TaskManager =====
+            print(f"🔍 步驟 1: 透過 Flink REST API 發現 TaskManager...")
+            try:
+                tm_list_response = requests.get(f"{self.flink_rest_url}/taskmanagers", timeout=5)
+                if tm_list_response.status_code == 200:
+                    tm_list_data = tm_list_response.json()
 
-                    # 修正 IP 格式：如果包含下劃線，替換為點號
-                    if '_' in host and not '.' in host:
-                        host = host.replace('_', '.')
+                    if 'taskmanagers' in tm_list_data:
+                        print(f"   ✅ 發現 {len(tm_list_data['taskmanagers'])} 個 TaskManager")
 
-                    current_load = float(r['value'][1])
+                        for tm in tm_list_data['taskmanagers']:
+                            tm_id = tm.get('id')
 
-                    # Map resource_id to CPU capacity
-                    cpu_limit = cpu_capacity_map.get(resource_id, 1.0)  # Default to 1.0 if unknown
+                            # 獲取詳細資訊
+                            try:
+                                detail_response = requests.get(f"{self.flink_rest_url}/taskmanagers/{tm_id}", timeout=3)
+                                if detail_response.status_code == 200:
+                                    detail_data = detail_response.json()
 
-                    tm_info[resource_id] = {
-                        "host": host,
-                        "current_load": current_load,
-                        "cpu_limit": cpu_limit
-                    }
+                                    # 提取 resourceId (優先) 或使用 tm_id
+                                    resource_id = detail_data.get('resourceId') or tm_id
 
-            # [還是有問題] Step 2: Add any missing TMs from cpu_capacity_map with zero load
-            # This ensures idle/registered TMs are included as migration targets
-            for resource_id, cpu_limit in cpu_capacity_map.items():
-                if resource_id not in tm_info:
-                    # Try multiple common metrics to verify TM exists
-                    metric_queries = [
-                        f'flink_taskmanager_Status_Flink_Memory_Managed_Total{{resource_id="{resource_id}"}}',
-                        f'flink_taskmanager_Status_Shuffle_Netty_UsedMemory{{resource_id="{resource_id}"}}',
-                        f'up{{job="taskmanager", resource_id="{resource_id}"}}'
-                    ]
+                                    # 正規化 resource_id: 將連字號轉換為底線 (tm-20c-1 -> tm_20c_1)
+                                    resource_id = resource_id.replace('-', '_')
 
-                    found = False
-                    for query_specific in metric_queries:
-                        try:
-                            resp = requests.get(f"{self.base_url}/api/v1/query", params={'query': query_specific}, timeout=2)
-                            specific_data = resp.json()
-                            print(f"ℹ️ 檢查 TaskManager {resource_id} 的 Prometheus 指標")
+                                    # 提取 Host 資訊
+                                    # 優先從 path 中解析 (格式: /192.168.1.100:xxxxx)
+                                    # 或從 hardware 中獲取
+                                    host = "unknown"
+                                    if 'path' in detail_data:
+                                        path = detail_data['path']
+                                        # 解析格式 "/192.168.1.100:xxxxx" -> "192.168.1.100"
+                                        if path.startswith('/'):
+                                            host_part = path[1:].split(':')[0]
+                                            # 處理 IPv4 格式中的下劃線 (192_168_1_100 -> 192.168.1.100)
+                                            if '_' in host_part and not '.' in host_part:
+                                                host = host_part.replace('_', '.')
+                                            else:
+                                                host = host_part
 
-                            if specific_data['status'] == 'success' and specific_data['data']['result']:
-                                # TM is registered and reporting metrics
-                                host = specific_data['data']['result'][0]['metric'].get('host', resource_id)
-                                if '_' in host and not '.' in host:
-                                    host = host.replace('_', '.')
+                                    # 如果從 path 無法取得，嘗試從 hardware.cpuCores 相關資訊推斷
+                                    if host == "unknown" and 'hardware' in detail_data:
+                                        # 某些部署可能會在 hardware 中包含 hostname
+                                        host = detail_data.get('hardware', {}).get('hostname', resource_id)
 
-                                tm_info[resource_id] = {
-                                    "host": host,
-                                    "current_load": 0.0,  # No tasks running, zero load
-                                    "cpu_limit": cpu_limit
-                                }
-                                print(f"ℹ️ 發現空閒 TaskManager: {resource_id} (CPU: {cpu_limit})")
-                                found = True
-                                break
-                        except Exception as e:
-                            # Try next metric
-                            continue
+                                    # 初始化 TM 資訊 (負載先設為 0.0，稍後由 Prometheus 更新)
+                                    cpu_limit = cpu_capacity_map.get(resource_id, 1.0)  # 預設 1.0 CPU
 
-                    if not found:
-                        print(f"⚠️ TaskManager {resource_id} 未在 Prometheus 中找到，可能尚未註冊")
+                                    tm_info[resource_id] = {
+                                        "host": host,
+                                        "current_load": 0.0,  # 初始化為 0，稍後更新
+                                        "cpu_limit": cpu_limit
+                                    }
+                                    print(f"      ✓ {resource_id}: Host={host}, CPU={cpu_limit}")
+
+                            except Exception as e:
+                                print(f"      ⚠️ 無法獲取 TM {tm_id} 詳細資訊: {e}")
+                                continue
+
+                else:
+                    print(f"   ⚠️ Flink REST API 回應異常: {tm_list_response.status_code}")
+
+            except Exception as e:
+                print(f"   ⚠️ 無法連接 Flink REST API: {e}")
+                print(f"   ⚠️ 將僅依賴 Prometheus 資料")
+
+            # ===== Step 2: 負載獲取 - 透過 Prometheus 查詢實際負載 =====
+            print(f"\n📊 步驟 2: 透過 Prometheus 查詢 TaskManager 負載...")
+            try:
+                query = 'avg(flink_taskmanager_job_task_busyTimeMsPerSecond) by (resource_id, tm_id, host)'
+                prom_response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query}, timeout=5)
+                prom_data = prom_response.json()
+
+                if prom_data['status'] == 'success' and prom_data['data']['result']:
+                    print(f"   ✅ 從 Prometheus 獲取到 {len(prom_data['data']['result'])} 個 TM 負載資料")
+
+                    for r in prom_data['data']['result']:
+                        # 提取 resource_id (優先使用 resource_id，否則使用 tm_id)
+                        resource_id = r['metric'].get('resource_id') or r['metric'].get('tm_id', 'unknown')
+
+                        # 正規化 resource_id
+                        resource_id = resource_id.replace('-', '_')
+
+                        current_load = float(r['value'][1])
+
+                        # 如果 REST API 已經發現該 TM，則更新負載
+                        if resource_id in tm_info:
+                            tm_info[resource_id]["current_load"] = current_load
+                            print(f"      ✓ 更新 {resource_id} 負載: {current_load:.2f}ms")
+                        else:
+                            # 如果 REST API 沒發現，但 Prometheus 有資料（向後兼容）
+                            host = r['metric'].get('host', 'unknown')
+
+                            # 修正 IP 格式：如果包含下劃線，替換為點號
+                            if '_' in host and not '.' in host:
+                                host = host.replace('_', '.')
+
+                            cpu_limit = cpu_capacity_map.get(resource_id, 1.0)
+
+                            tm_info[resource_id] = {
+                                "host": host,
+                                "current_load": current_load,
+                                "cpu_limit": cpu_limit
+                            }
+                            print(f"      ✓ (僅從 Prom) {resource_id}: Load={current_load:.2f}ms, CPU={cpu_limit}")
+                else:
+                    print(f"   ⚠️ Prometheus 未回傳任何負載資料 (所有 TM 可能都是空閒的)")
+
+            except Exception as e:
+                print(f"   ⚠️ Prometheus 查詢失敗: {e}")
+
+            # ===== Step 3: 靜態補全 - 確保 cpu_capacity_map 中的所有 TM 都被考慮 =====
+            # (此步驟在 Step 1 中已處理，如果 REST API 回傳的 TM 不在 map 中，則使用預設值)
+
+            # 最終統計
+            print(f"\n✅ 總計發現 {len(tm_info)} 個 TaskManager:")
+            for rid, info in tm_info.items():
+                print(f"   • {rid}: Host={info['host']}, Load={info['current_load']:.2f}ms, CPU={info['cpu_limit']}")
 
             if not tm_info:
-                print(f"❌ 未找到任何 TaskManager")
+                print(f"❌ 未找到任何 TaskManager (REST API 與 Prometheus 皆無資料)")
 
             return tm_info
 
@@ -851,9 +917,13 @@ class FlinkPropose:
     def generate_migration_plan(self, prioritized_list=None):
         """
         Heuristic Greedy Allocation Algorithm with:
+        - Pending State: Remove bottleneck subtasks from migration_plan before allocation
+        - Pre-deduction: Release resources from original TMs upfront
         - Dynamic weighting based on bottleneck cause (CPU vs Network)
         - Multi-factor scoring: CPU load, network bandwidth, topology affinity
-        - Hard constraints: slot limit (6), CPU headroom (800ms), bandwidth limit (50Mbit/s)
+        - Hard constraints: slot limit (6), CPU headroom (800ms), bandwidth limit
+        - Immediate feedback: Update resource_map and migration_plan after each allocation
+        - Fallback guarantee: Force return to original TM if no valid allocation found
 
         Args:
             prioritized_list: List of (subtask_id, priority_score) tuples sorted by score descending
@@ -879,11 +949,11 @@ class FlinkPropose:
             print("⚠️ 未檢測到過載的 subtask，無需產生遷移計畫")
             return None
 
-        # ===== 1. Resource Snapshot & Pre-deduction (Initialization) =====
+        # ===== Hard Constraints =====
         MAX_SLOTS_PER_TM = 6
-        CPU_HEADROOM_LIMIT = 800  # 80% load in ms
+        CPU_HEADROOM_LIMIT = 800  # ms (changed from 850 to 800 as per requirement)
 
-        # Initialize Resource Map
+        # ===== 1. Initialize Resource Map =====
         resource_map = {}
         for rid, info in tm_info.items():
             resource_map[rid] = {
@@ -894,7 +964,7 @@ class FlinkPropose:
                 'host': info['host']
             }
 
-        # Count current slot occupancy and calculate network traffic
+        # ===== 2. Build Initial State: Count all subtasks (including those NOT in prioritized_list) =====
         for subtask_id, resource_id in current_locations.items():
             if resource_id in resource_map:
                 resource_map[resource_id]['slots'] += 1
@@ -905,26 +975,31 @@ class FlinkPropose:
                     traffic = actual_rate * self.AVERAGE_RECORD_SIZE
                     resource_map[resource_id]['network_traffic'] += traffic
 
-        # Pre-deduct resources for subtasks to be migrated
+        # ===== 3. Pre-deduction: Release resources from bottleneck subtasks' original TMs =====
         prioritized_subtask_ids = {subtask_id for subtask_id, _ in prioritized_list}
+
+        print(f"\n🔄 預扣除階段：從原 TM 釋放瓶頸 Subtask 資源")
         for subtask_id in prioritized_subtask_ids:
             if subtask_id not in self._task_info:
                 continue
 
-            current_rid = current_locations.get(subtask_id, 'unknown')
-            if current_rid not in resource_map:
+            original_rid = current_locations.get(subtask_id, 'unknown')
+            if original_rid not in resource_map:
                 continue
 
-            # Mark resources as "to-be-released"
-            resource_map[current_rid]['slots'] -= 1
+            # Release resources from original TM
+            resource_map[original_rid]['slots'] -= 1
 
             task_detail = self._task_info[subtask_id]
             busy_time_ms = task_detail['T_busy'] * 1000
-            resource_map[current_rid]['busy_time'] -= busy_time_ms
+            resource_map[original_rid]['busy_time'] -= busy_time_ms
 
             actual_rate = task_detail['actual_input_rate']
             traffic = actual_rate * self.AVERAGE_RECORD_SIZE
-            resource_map[current_rid]['network_traffic'] -= traffic
+            resource_map[original_rid]['network_traffic'] -= traffic
+
+            print(f"   ✓ 釋放 {subtask_id} 從 {original_rid}: "
+                  f"-1 Slot, -{busy_time_ms:.0f}ms, -{traffic/(1024*1024):.2f}MB/s")
 
         print(f"\n📊 資源快照 (Pre-deduction 後可用資源):")
         for rid, res in resource_map.items():
@@ -932,14 +1007,20 @@ class FlinkPropose:
                   f"BusyTime={res['busy_time']:.0f}ms, "
                   f"NetTraffic={res['network_traffic']/(1024*1024):.2f}MB/s")
 
-        # ===== Initialize migration plan =====
+        # ===== 4. Initialize Migration Plan with Pending State =====
+        # Start with current locations for non-bottleneck subtasks
         migration_plan = {}
         for subtask_id, current_resource_id in current_locations.items():
-            migration_plan[subtask_id] = current_resource_id
+            if subtask_id not in prioritized_subtask_ids:
+                # Keep non-bottleneck subtasks in their current locations
+                migration_plan[subtask_id] = current_resource_id
+            # else: Leave bottleneck subtasks in pending state (not in migration_plan yet)
 
-        print(f"\n🎯 啟發式貪婪分配 (動態權重 + 多因子評分)")
+        # TODO: 找相對符合要球的TM 而非追求極致的改善
+        print(f"\n🎯 啟發式貪婪分配 (待定狀態 + 動態權重 + 多因子評分)")
+        print(f"   待分配瓶頸 Subtask: {len(prioritized_subtask_ids)} 個")
 
-        # ===== 5. Greedy Execution =====
+        # ===== 5. Greedy Allocation Loop =====
         for subtask_id, priority_score in prioritized_list:
             # Get task info if available
             if not hasattr(self, '_task_info') or subtask_id not in self._task_info:
@@ -954,12 +1035,12 @@ class FlinkPropose:
             state_size = task_detail.get('state_size', 0)
             cause = task_detail.get('bottleneck_cause', 'CPU_BOTTLENECK')
 
-            current_resource_id = current_locations.get(subtask_id, 'unknown')
+            original_rid = current_locations.get(subtask_id, 'unknown')
 
             # Calculate subtask's resource requirements
             subtask_traffic = actual_rate * self.AVERAGE_RECORD_SIZE
 
-            # ===== 2. Dynamic Weighting by Bottleneck Cause =====
+            # ===== 6. Dynamic Weighting by Bottleneck Cause =====
             if cause == "CPU_BOTTLENECK":
                 W_cpu, W_net, W_topo = 0.6, 0.2, 0.2
             elif cause == "NETWORK_BOTTLENECK":
@@ -970,13 +1051,13 @@ class FlinkPropose:
             # Get neighbors for topology scoring
             upstream_keywords, downstream_keywords = self.get_neighbors(subtask_id)
 
-            # Evaluate all TMs and find best match
+            # ===== 7. Evaluate all TMs and find best match =====
             best_tm = None
             best_score = -float('inf')
             scores_log = []
 
             for rid, res in resource_map.items():
-                # ===== 4. Hard Constraints (The Guardrails) =====
+                # ===== 8. Hard Constraints Guard =====
                 # Projected resources after adding this subtask
                 projected_slots = res['slots'] + 1
                 projected_busy = res['busy_time'] + busy_time_ms
@@ -990,14 +1071,14 @@ class FlinkPropose:
                 if projected_traffic > self.BANDWIDTH_LIMIT_BYTES_PER_SEC:
                     continue  # Violates bandwidth limit
 
-                # ===== 3. The Scoring Formula =====
+                # ===== 9. Multi-Factor Scoring =====
                 # CPU Score: (1 - projected_busy / 1000)
                 cpu_score = max(0, 1 - (projected_busy / 1000.0))
 
                 # Net Score: (1 - projected_traffic / bandwidth_limit)
                 net_score = max(0, 1 - (projected_traffic / self.BANDWIDTH_LIMIT_BYTES_PER_SEC))
 
-                # Topo Score: Communication Affinity
+                # Topo Score: Communication Affinity (based on current migration_plan)
                 topo_score = 0.0
                 # Check if this TM hosts upstream or downstream neighbors
                 for other_subtask_id, other_rid in migration_plan.items():
@@ -1023,11 +1104,12 @@ class FlinkPropose:
                     best_score = final_score
                     best_tm = rid
 
-            # Assign to best TM
+            # ===== 10. Allocation Decision & Immediate Feedback Update =====
             if best_tm:
+                # Success: Assign to best TM
                 migration_plan[subtask_id] = best_tm
 
-                # ===== Immediately update Resource Map =====
+                # Immediately update Resource Map
                 resource_map[best_tm]['slots'] += 1
                 resource_map[best_tm]['busy_time'] += busy_time_ms
                 resource_map[best_tm]['network_traffic'] += subtask_traffic
@@ -1036,28 +1118,64 @@ class FlinkPropose:
                 state_size_mb = state_size / (1024 * 1024) if state_size > 0 else 0
                 overload_pct = ((actual_rate - max_capacity) / max_capacity * 100) if max_capacity > 0 else 0
 
-                print(f"\n📋 分配 (優先級={priority_score:.3f}, {cause.replace('_BOTTLENECK', '')}): {subtask_id}")
-                print(f"   從: {current_resource_id} -> 到: {best_tm}")
+                print(f"\n✅ 分配成功 (優先級={priority_score:.3f}, {cause.replace('_BOTTLENECK', '')}): {subtask_id}")
+                print(f"   從: {original_rid} -> 到: {best_tm}")
                 print(f"   權重: W_cpu={W_cpu}, W_net={W_net}, W_topo={W_topo}")
                 print(f"   最佳得分: {best_score:.3f} (CPU:{scores_log[[s[0] for s in scores_log].index(best_tm)][2]:.2f}, "
                       f"Net:{scores_log[[s[0] for s in scores_log].index(best_tm)][3]:.2f}, "
                       f"Topo:{scores_log[[s[0] for s in scores_log].index(best_tm)][4]:.2f})")
                 print(f"   新狀態: Slots={resource_map[best_tm]['slots']}/{MAX_SLOTS_PER_TM}, "
-                      f"BusyTime={resource_map[best_tm]['busy_time']:.0f}ms, "
+                      f"BusyTime={resource_map[best_tm]['busy_time']:.0f}/{CPU_HEADROOM_LIMIT}ms, "
                       f"Traffic={resource_map[best_tm]['network_traffic']/(1024*1024):.2f}MB/s")
                 if state_size > 0:
                     print(f"   💾 State: {format_bytes(state_size)}")
             else:
-                # No suitable TM found (all violate hard constraints)
-                print(f"⚠️ 無可用 TM: {subtask_id} (所有 TM 違反硬約束), 維持原位 {current_resource_id}")
-                migration_plan[subtask_id] = current_resource_id
+                # ===== 11. Fallback Guarantee: Force return to original TM =====
+                print(f"\n⚠️ 無可用 TM: {subtask_id} (所有 TM 違反硬約束)")
+                print(f"   🔄 強制回歸原位: {original_rid}")
 
-        # ===== Final Summary =====
-        print(f"\n📊 最終資源分配:")
+                # Force allocation back to original TM
+                migration_plan[subtask_id] = original_rid
+
+                # Update resource_map to reflect this forced allocation
+                # (Prevent subsequent subtasks from over-allocating)
+                if original_rid in resource_map:
+                    resource_map[original_rid]['slots'] += 1
+                    resource_map[original_rid]['busy_time'] += busy_time_ms
+                    resource_map[original_rid]['network_traffic'] += subtask_traffic
+
+                    print(f"   ⚠️ 原 TM 資源更新 (防止後續過度分配): "
+                          f"Slots={resource_map[original_rid]['slots']}/{MAX_SLOTS_PER_TM}, "
+                          f"BusyTime={resource_map[original_rid]['busy_time']:.0f}ms")
+
+        # ===== 12. Final Validation & Summary =====
+        print(f"\n📊 最終資源分配驗證:")
+        validation_errors = []
         for rid, res in resource_map.items():
-            print(f"   {rid}: Slots={res['slots']}/{MAX_SLOTS_PER_TM}, "
+            slots_ok = res['slots'] <= MAX_SLOTS_PER_TM
+            cpu_ok = res['busy_time'] <= CPU_HEADROOM_LIMIT
+            net_ok = res['network_traffic'] <= self.BANDWIDTH_LIMIT_BYTES_PER_SEC
+
+            status = "✅" if (slots_ok and cpu_ok and net_ok) else "❌"
+
+            print(f"   {status} {rid}: Slots={res['slots']}/{MAX_SLOTS_PER_TM}, "
                   f"BusyTime={res['busy_time']:.0f}/{CPU_HEADROOM_LIMIT}ms, "
                   f"Traffic={res['network_traffic']/(1024*1024):.2f}/6.25MB/s")
+
+            if not slots_ok:
+                validation_errors.append(f"{rid}: Slot 超限 ({res['slots']} > {MAX_SLOTS_PER_TM})")
+            if not cpu_ok:
+                validation_errors.append(f"{rid}: CPU 超限 ({res['busy_time']:.0f}ms > {CPU_HEADROOM_LIMIT}ms)")
+            if not net_ok:
+                validation_errors.append(f"{rid}: 頻寬超限 ({res['network_traffic']/(1024*1024):.2f}MB/s > 6.25MB/s)")
+
+        if validation_errors:
+            print(f"\n❌ 資源分配驗證失敗:")
+            for error in validation_errors:
+                print(f"   • {error}")
+            print(f"\n⚠️ 警告：產生的遷移計畫可能違反硬約束，請檢查!")
+        else:
+            print(f"\n✅ 資源分配驗證通過：所有硬約束滿足")
 
         print(f"\n✅ 遷移計畫包含 {len(migration_plan)} 個 subtask")
         migrated_count = sum(1 for sid in prioritized_subtask_ids if migration_plan[sid] != current_locations.get(sid))
@@ -1206,71 +1324,91 @@ class FlinkPropose:
         except Exception as e:
             print(f"❌ 提交失敗: {e}")
             return None
-
-
-    def trigger_migration(self, migration_plan, job_id=None, auto_restart=False):
+    def wait_for_job_termination(self, job_id, max_wait_sec=30):
         """
-        觸發完整的遷移流程
-
-        Args:
-            migration_plan: 遷移計畫字典
-            job_id: Job ID (如果為 None 則自動獲取)
-            auto_restart: 是否自動從 savepoint 重新提交 job (預設 True)
+        [優化點] 輪詢 REST API 確保舊 Job 已完全停止並釋放 Slot。
+        這取代了硬編碼的 time.sleep(5)，能顯著降低總中斷時間。
         """
-        # 檢查冷卻時間
+        start_wait = time.perf_counter()
+        print(f"⏳ 正在確認 Job {job_id} 是否已釋放資源...")
+        while time.perf_counter() - start_wait < max_wait_sec:
+            try:
+                running_jobs = self.get_running_jobs()
+                if job_id not in running_jobs:
+                    print(f"✅ Job {job_id} 已確認停止 [耗時: {time.perf_counter() - start_wait:.3f}s]")
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.5) # 每 0.5 秒檢查一次
+        print(f"⚠️ 等待 Job {job_id} 停止超時")
+        return False
+
+    def trigger_migration(self, migration_plan, job_id=None, auto_restart=True):
         current_time = time.time()
         if current_time - self.last_migration_time < self.migration_cooldown:
             remaining = self.migration_cooldown - (current_time - self.last_migration_time)
             print(f"⏳ 遷移冷卻中，剩餘 {remaining:.0f} 秒")
             return False
 
-        # 1. 寫入遷移計畫
         if not self.write_migration_plan(migration_plan):
             return False
 
-        # 2. 獲取正在運行的 Job
         if job_id is None:
             running_jobs = self.get_running_jobs()
-            if not running_jobs:
-                print("⚠️ 沒有正在運行的 Job")
-                return False
-            job_id = running_jobs[0]  # 使用第一個 Job
+            if not running_jobs: return False
+            job_id = running_jobs[0]
 
-        # 3. Stop with Savepoint
+        # --- 遷移計時開始 ---
+        # 紀錄絕對時間戳記 (Epoch time)，用於與 latency_monitor 對齊
+        migration_event_timestamp = time.time()
+        start_migration = time.perf_counter()
+
+        # 1. Stop with Savepoint
+        stop_start = time.perf_counter()
         savepoint_path = self.stop_job_with_savepoint(job_id)
-        if not savepoint_path:
-            return False
+        stop_end = time.perf_counter()
+        if not savepoint_path: return False
 
-        # 4. 等待 Job 完全停止
-        print("⏳ 等待 Job 停止...")
-        time.sleep(2)
+        # 2. 動態等待資源釋放 (優化點：取代原本的 sleep(5))
+        wait_start = time.perf_counter()
+        print("⏳ 動態檢查資源釋放情況...")
+        self.wait_for_job_termination(job_id)
+        wait_end = time.perf_counter()
 
-        # 5. 自動從 Savepoint 重新提交 Job
+        # 3. 重新啟動 Job
+        restart_start = time.perf_counter()
+        new_job_id = None
         if auto_restart:
             new_job_id = self.submit_job_from_savepoint(savepoint_path)
-            if new_job_id:
-                print(f"✅ 遷移流程完成！新 Job 已啟動")
-                self.last_migration_time = current_time
-                return True
-            else:
-                print(f"❌ 自動重啟失敗，請手動重新提交 Job:")
-                print(f"   Savepoint 路徑: {savepoint_path}")
-                return False
-        else:
-            print("⚠️ 請手動使用以下指令重新提交 Job:")
-            print(f"   docker exec -it jobmanager bash -c \"")
-            print(f"     export NEXMARK_CONF_DIR={self.job_config['nexmark_conf_dir']} && \\")
-            print(f"     /opt/flink/bin/flink run \\")
-            print(f"     -s {savepoint_path} \\")
-            print(f"     -d \\")
-            print(f"     -c {self.job_config['entry_class']} \\")
-            print(f"     -p {self.job_config['parallelism']} \\")
-            print(f"     {self.job_config['jar_path']} \\")
-            print(f"     {' '.join(self.job_config['program_args'])}")
-            print(f"   \"")
+        restart_end = time.perf_counter()
 
+        # --- 遷移計時結束 ---
+        end_migration = time.perf_counter()
+
+        # 計算各階段耗時 (秒)
+        savepoint_latency = stop_end - stop_start
+        wait_latency = wait_end - wait_start
+        restart_latency = restart_end - restart_start
+        total_downtime = end_migration - start_migration
+
+        # === 紀錄詳細中斷時間至 CSV (用於實驗分析) ===
+        log_file = "/home/yenwei/research/structure_setup/output/propose_migration_performance.csv"
+        file_exists = os.path.isfile(log_file)
+        with open(log_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["event_timestamp", "total_downtime", "savepoint_time", "resource_wait_time", "restart_time", "job_id"])
+            writer.writerow([migration_event_timestamp, total_downtime, savepoint_latency, wait_latency, restart_latency, job_id])
+
+        print("\n" + "="*40)
+        print(f"📊 Propose 遷移分析 (中斷時間: {total_downtime:.3f}s)")
+        print(f"🔹 Savepoint: {savepoint_latency:.3f}s | Wait: {wait_latency:.3f}s | Restart: {restart_latency:.3f}s")
+        print("="*40)
+
+        if new_job_id:
             self.last_migration_time = current_time
             return True
+        return False
 
     def auto_detect_and_migrate(self, busy_threshold=None, skew_threshold=None):
         """

@@ -45,7 +45,7 @@ CREATE TABLE nexmark_datagen_source (
     -- 這裡速率可以設快一點，反正只是為了生成檔案，越快寫完越好
     'rows-per-second' = '100000',
 
-    -- 以下欄位規則維持不變 auction
+    -- 以下欄位規則維持不變 auction 10000種品項
     'fields.auction.min' = '1',
     'fields.auction.max' = '10000',
     'fields.bidder.min' = '1',

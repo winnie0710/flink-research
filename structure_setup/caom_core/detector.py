@@ -2,6 +2,7 @@ import requests
 # import numpy as np
 import json
 import time
+import csv
 import os
 import subprocess
 import re
@@ -674,94 +675,89 @@ class FlinkDetector:
             print(f"❌ 重新提交 Job 失敗: {e}")
             return None
 
-    def trigger_migration(self, migration_plan, job_id=None, auto_restart=True):
-        """
-        觸發完整的遷移流程
 
-        Args:
-            migration_plan: 遷移計畫字典
-            job_id: Job ID (如果為 None 則自動獲取)
-            auto_restart: 是否自動從 savepoint 重新提交 job (預設 True)
-        """
-        # 檢查冷卻時間
+    # 在 FlinkDetector 類別中新增一個輔助方法來檢查 Job 是否已消失 移除硬編碼的 time.sleep(5)
+    def wait_for_job_termination(self, job_id, max_wait_sec=30):
+        """輪詢 REST API 確保 Job 已經不在 RUNNING 狀態，釋放資源"""
+        start_wait = time.perf_counter()
+        while time.perf_counter() - start_wait < max_wait_sec:
+            try:
+                running_jobs = self.get_running_jobs()
+                if job_id not in running_jobs:
+                    print(f"✅ Job {job_id} 已確認停止並釋放資源")
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.5) # 每 0.5 秒檢查一次，遠比 sleep(5) 快
+        return False
+
+    # 觸發完整的遷移流程
+    def trigger_migration(self, migration_plan, job_id=None, auto_restart=True):
         current_time = time.time()
         if current_time - self.last_migration_time < self.migration_cooldown:
             remaining = self.migration_cooldown - (current_time - self.last_migration_time)
             print(f"⏳ 遷移冷卻中，剩餘 {remaining:.0f} 秒")
             return False
 
-        # 1. 寫入遷移計畫
         if not self.write_migration_plan(migration_plan):
             return False
 
-        # 2. 獲取正在運行的 Job
         if job_id is None:
             running_jobs = self.get_running_jobs()
-            if not running_jobs:
-                print("⚠️ 沒有正在運行的 Job")
-                return False
-            job_id = running_jobs[0]  # 使用第一個 Job
+            if not running_jobs: return False
+            job_id = running_jobs[0]
 
+        # --- 遷移計時開始 ---
+        # 紀錄絕對時間戳記 (Epoch time)，用於與 latency_monitor 對齊
+        migration_event_timestamp = time.time()
         start_migration = time.perf_counter()
-        # 3. Stop with Savepoint
+
+        # 1. Stop with Savepoint
         stop_start = time.perf_counter()
         savepoint_path = self.stop_job_with_savepoint(job_id)
         stop_end = time.perf_counter()
-        if not savepoint_path:
-            return False
+        if not savepoint_path: return False
 
-        # 4. 等待 Job 完全停止
+        # 2. 動態等待資源釋放 (優化點：取代原本的 sleep(5))
         wait_start = time.perf_counter()
-        print("⏳ 等待 Job 停止...")
-        time.sleep(5)
+        print("⏳ 動態檢查資源釋放情況...")
+        self.wait_for_job_termination(job_id)
         wait_end = time.perf_counter()
 
-        # 5. 自動從 Savepoint 重新提交 Job
+        # 3. 重新啟動 Job
         restart_start = time.perf_counter()
+        new_job_id = None
         if auto_restart:
             new_job_id = self.submit_job_from_savepoint(savepoint_path)
-            restart_end = time.perf_counter()
-            # --- 延遲測量結束 ---
-            end_migration = time.perf_counter()
+        restart_end = time.perf_counter()
 
-            # 計算各階段耗時
-            savepoint_latency = stop_end - stop_start
-            restart_latency = restart_end - restart_start
-            total_downtime = end_migration - start_migration
+        # --- 遷移計時結束 ---
+        end_migration = time.perf_counter()
 
-            print("\n" + "="*40)
-            print("📊 Flink 遷移延遲分析報告")
-            print("-" * 40)
-            print(f"🔹 Savepoint & 停止耗時: {savepoint_latency:.3f} 秒")
-            print(f"🔹 系統等待 (Sleep) 耗時: {wait_end - wait_start:.3f} 秒")
-            print(f"🔹 重新啟動提交耗時:      {restart_latency:.3f} 秒")
-            print("-" * 40)
-            print(f"🔥 總服務中斷時間 (Downtime): {total_downtime:.3f} 秒")
-            print("="*40)
+        # 計算各階段耗時 (秒)
+        savepoint_latency = stop_end - stop_start
+        wait_latency = wait_end - wait_start
+        restart_latency = restart_end - restart_start
+        total_downtime = end_migration - start_migration
 
-            if new_job_id:
-                print(f"✅ 遷移流程完成！新 Job 已啟動")
-                self.last_migration_time = current_time
-                return True
-            else:
-                print(f"❌ 自動重啟失敗，請手動重新提交 Job:")
-                print(f"   Savepoint 路徑: {savepoint_path}")
-                return False
-        else:
-            print("⚠️ 請手動使用以下指令重新提交 Job:")
-            print(f"   docker exec -it jobmanager bash -c \"")
-            print(f"     export NEXMARK_CONF_DIR={self.job_config['nexmark_conf_dir']} && \\")
-            print(f"     /opt/flink/bin/flink run \\")
-            print(f"     -s {savepoint_path} \\")
-            print(f"     -d \\")
-            print(f"     -c {self.job_config['entry_class']} \\")
-            print(f"     -p {self.job_config['parallelism']} \\")
-            print(f"     {self.job_config['jar_path']} \\")
-            print(f"     {' '.join(self.job_config['program_args'])}")
-            print(f"   \"")
+        # === 紀錄至 CSV (用於實驗分析) ===
+        log_file = "/home/yenwei/research/structure_setup/output/caom_migration_performance.csv"
+        file_exists = os.path.isfile(log_file)
+        with open(log_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(["event_timestamp", "total_downtime", "savepoint_time", "resource_wait_time", "restart_time", "job_id"])
+            writer.writerow([migration_event_timestamp, total_downtime, savepoint_latency, wait_latency, restart_latency, job_id])
 
+        print("\n" + "="*40)
+        print(f"📊 CAOM 遷移分析 (中斷時間: {total_downtime:.3f}s)")
+        print(f"🔹 Savepoint: {savepoint_latency:.3f}s | Wait: {wait_latency:.3f}s | Restart: {restart_latency:.3f}s")
+        print("="*40)
+
+        if new_job_id:
             self.last_migration_time = current_time
             return True
+        return False
 
     def auto_detect_and_migrate(self, busy_threshold=None, skew_threshold=None):
         """

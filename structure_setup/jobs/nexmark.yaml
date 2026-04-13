@@ -56,7 +56,7 @@ nexmark.workload.suite.100m.warmup.tps: 50000
 nexmark.workload.suite.datagen.tps: 50000
 nexmark.workload.suite.datagen.queries: "generate_dataset"
 nexmark.workload.suite.datagen.queries.cep: "generate_dataset"
-nexmark.workload.suite.datagen.events.num: 500000000
+nexmark.workload.suite.datagen.events.num: 1000000000
 
 #==============================================================================
 # Kafka config

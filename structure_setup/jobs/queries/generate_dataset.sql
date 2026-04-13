@@ -53,8 +53,8 @@ CREATE TABLE nexmark_datagen_source (
     'fields.price.min' = '10',
     'fields.price.max' = '100000',
     'fields.channel.length' = '10',
-    'fields.url.length' = '10',
-    'fields.extra.length' = '10'
+    'fields.url.length' = '30',
+    'fields.extra.length' = '30'
 );
 
 -- ------------------------------------------------------------------------

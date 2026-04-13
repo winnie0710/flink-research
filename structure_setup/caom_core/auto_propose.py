@@ -8,7 +8,7 @@ import sys
 import os
 import time
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from propose import FlinkPropose
+from propose_2 import FlinkPropose
 
 def main():
     print("=== propose 自動遷移系統 ===")
@@ -50,6 +50,8 @@ def main():
     print(f"   - 遷移計畫路徑: {propose.migration_plan_path}")
     print(f"   - Savepoint 目錄: {propose.savepoint_dir}")
     print("\n開始監控...\n")
+
+    time.sleep(100)
 
     try:
         while True:

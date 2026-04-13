@@ -5,8 +5,12 @@
 
 # 如果設置了 TM_RESOURCE_ID 環境變量，寫入 flink-conf.yaml
 if [ -n "$TM_RESOURCE_ID" ]; then
-    echo "Setting TaskManager resource-id to: $TM_RESOURCE_ID"
-    echo "taskmanager.resource-id: $TM_RESOURCE_ID" >> /opt/flink/conf/flink-conf.yaml
+    # 底線格式，與 propose.py 的 replace('-','_') 對齊
+    TM_RESOURCE_ID_UNDERSCORE="${TM_RESOURCE_ID//-/_}"
+    echo "Setting TaskManager resource-id to: $TM_RESOURCE_ID_UNDERSCORE"
+    # 用 sed 覆蓋，不要用 >> 追加
+    sed -i "/taskmanager\.resource-id/d" /opt/flink/conf/flink-conf.yaml
+    echo "taskmanager.resource-id: $TM_RESOURCE_ID_UNDERSCORE" >> /opt/flink/conf/flink-conf.yaml
 fi
 
 # 啟動 TaskManager（背景執行）

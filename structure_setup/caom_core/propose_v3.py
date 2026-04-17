@@ -6,9 +6,16 @@ import time
 import os
 import subprocess
 
+"""
+分成顯性瓶頸和隱性瓶頸 
+顯性用 Z-score 異常檢測法
+隱性用 bp > busy  actual input rate > max capacity
+加入 topology affinity
+後面和 v2 相同
+"""
 
-log_file = "/home/yenwei/research/structure_setup/output/t12_2/subtask_metrics_history.csv"
-detail_log = "/home/yenwei/research/structure_setup/output/t12_2/migration_details.csv"
+log_file = "/home/yenwei/research/structure_setup/output/t13_6/subtask_metrics_history.csv"
+detail_log = "/home/yenwei/research/structure_setup/output/t13_6/migration_details.csv"
 
 def format_bytes(bytes_value):
     """將字節轉換為人類可讀的格式"""
@@ -67,6 +74,7 @@ def match_vertex_to_task_name(vertex_name, task_name):
 class FlinkPropose:
 
     AVERAGE_RECORD_SIZE = 100  # bytes per record (default assumption 確實一筆資料大約 100 byte)
+    SOURCE_MAX_TPS = 12_000_000  # bytes/s，全局 Source 總速率上限，防止 busyTime 極小時速率失真
 
     def __init__(self, prometheus_url="http://localhost:9090",
                  flink_rest_url="http://localhost:8081",
@@ -99,7 +107,7 @@ class FlinkPropose:
         }
         self.tm_bandwidth_map = {      # (單位 Bytes/sec)
             "tm_20c_1": 31250000,      # 250mbit
-            "tm_20c_2_net": 12500000,  # 100mbit
+            "tm_20c_2_net": 18750000,  # 100mbit
             "tm_10c_3_cpu": 31250000,  # 250mbit
             "tm_20c_4": 18750000       # 100mbit
         }
@@ -328,6 +336,9 @@ class FlinkPropose:
 
                 subtask_id = f"{task_name}_{idx}"
 
+                out_pool = outPoolUsage.get(task_name, {}).get(idx, 0.0)
+                in_pool  = inPoolUsage.get(task_name, {}).get(idx, 0.0)
+
                 task_info[subtask_id] = {
                     "task_name": task_name,
                     "subtask_index": idx,
@@ -341,11 +352,12 @@ class FlinkPropose:
                     "max_capacity": 0.0,
                     "is_bottleneck": False,
                     "bottleneck_cause": None,
-                    "state_size": state_size
+                    "state_size": state_size,
+                    "out_pool_usage": out_pool,
+                    "in_pool_usage": in_pool,
                 }
 
         # Step A: Recover actual source rate 由 source 開始 其他用 BFS 搭配 out/in 推算
-        # TODO source 用背壓還原後過大 真的直接這樣算嗎？ 設T_busy保底 ？？
         # Identify source operators (those with "Source" in name)
         source_tasks = {k: v for k, v in task_info.items() if "Source" in v["task_name"]}
 
@@ -355,19 +367,30 @@ class FlinkPropose:
             observed_rate = info["observed_rate"]
 
             if T_busy > 0:
-                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)  只考慮被「反壓」擋住的資料。
+                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)
                 print(f"  Source: {subtask_id} T_busy = {T_busy} T_bp = {T_bp} observed_rate = {observed_rate}")
                 T_busy = max(T_busy, 0.15)  # 保底 150ms，防止分母過小導致速率爆炸
                 actual_source_rate = observed_rate * (1 + T_bp / T_busy)
-
                 info["actual_input_rate"] = actual_source_rate
-                print(f" 過高 Source: {subtask_id} actual_input_rate = {actual_source_rate}, T_busy = {T_busy}")
+                print(f"  還原速率 Source: {subtask_id} actual_input_rate = {actual_source_rate:.0f}, T_busy = {T_busy}")
             else:
                 info["actual_input_rate"] = observed_rate
-
+        """
+        # Step A.1: Proportional Capping — 防止 busyTime 極小時 Source 速率失真
+        total_source_rate = sum(info["actual_input_rate"] for info in source_tasks.values())
+        if total_source_rate > self.SOURCE_MAX_TPS and total_source_rate > 0:
+            scale = self.SOURCE_MAX_TPS / total_source_rate
+            print(f"\n  [Proportional Capping] 還原總速率 {total_source_rate/1e6:.2f} MB/s > 上限 {self.SOURCE_MAX_TPS/1e6:.2f} MB/s，縮放比例 = {scale:.4f}")
+            for subtask_id, info in source_tasks.items():
+                before = info["actual_input_rate"]
+                info["actual_input_rate"] *= scale
+                print(f"    {subtask_id}: {before:.0f} -> {info['actual_input_rate']:.0f} bytes/s")
+        """
         # Step B: Recover actual input rate for all operators using BFS
         # Build adjacency list based on typical Flink pipeline order
         target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
+        #q5
+        #target_order = ["Source", "Window_Auction", "Window_Max", "Sink"]
 
         # Group tasks by operator type
         operator_groups = {}
@@ -392,7 +415,6 @@ class FlinkPropose:
         # Propagate actual input rates downstream
         # TODO : BFS 也要設防爆門檻 ratio 嗎？
         # TODO : 「應該不用」建立「多對多」的拓撲視圖 ，針對多輸入算子（如 Window_Join 同時接收來自兩個算子流的情況），目前的公式確實會失效，因為它假設了「一對一」的上下游關係。
-
 
         for i in range(1, len(ordered_operators)):
             upstream_op = ordered_operators[i - 1]
@@ -429,67 +451,152 @@ class FlinkPropose:
 
             info["max_capacity"] = max_capacity
 
-        # Step D: Hierarchical Diagnosis - Two-Branch Logic
-        # Step D.1: Get subtask locations and TM-level network traffic
+        # ── STEP 0: 全域指標正則化 (Z-score Normalization) ─────────────────
+        Z_THRESHOLD = 1.0    # 1-sigma: 前 ~16% 最忙碌視為統計顯著
+        SIGMA_MIN   = 0.001  # σ 過小代表負載均勻，停用 Z-score 判斷以防抖動
+
+        all_T_busy  = [info["T_busy"]        for info in task_info.values()]
+        all_pool_out = [info["out_pool_usage"] for info in task_info.values()]
+
+        mu_busy  = sum(all_T_busy)   / len(all_T_busy)   if all_T_busy   else 0.0
+        mu_pool  = sum(all_pool_out) / len(all_pool_out) if all_pool_out else 0.0
+
+        def _std(values, mean_val):
+            if len(values) < 2:
+                return 0.0
+            return (sum((x - mean_val) ** 2 for x in values) / len(values)) ** 0.5
+
+        sigma_busy = _std(all_T_busy,   mu_busy)
+        sigma_pool = _std(all_pool_out, mu_pool)
+
+        print(f"\n📊 [STEP 0] Z-score 正則化: "
+              f"μ_busy={mu_busy*1000:.1f}ms σ_busy={sigma_busy*1000:.1f}ms | "
+              f"μ_pool={mu_pool:.3f} σ_pool={sigma_pool:.3f}")
+        if sigma_busy < SIGMA_MIN:
+            print("   ⚠️ σ_busy 過小 (負載均勻)，CPU Z-score 判斷停用")
+        if sigma_pool < SIGMA_MIN:
+            print("   ⚠️ σ_pool 過小，Network Z-score 判斷停用")
+
+        # TM-level network saturation (needed for explicit network detection)
         subtask_locations = self.get_subtask_locations()
 
-        # Calculate total network traffic per TaskManager
-        # TODO : 每個TM都爆掉 不是這樣吧？
-        tm_network_traffic = {}  # {tm_resource_id: total_bytes_per_sec}
-        # 遍歷所有 subtask ，找出其所在的 tm_resource_id 後，將流量累加到該 TM 的總值中。
+        tm_network_traffic = {}
         for subtask_id, info in task_info.items():
             tm_id = subtask_locations.get(subtask_id, "unknown")
             if tm_id != "unknown":
                 if tm_id not in tm_network_traffic:
                     tm_network_traffic[tm_id] = {"in": 0.0, "out": 0.0}
-                tm_network_traffic[tm_id]["in"] += info["observed_input_rate"]
+                tm_network_traffic[tm_id]["in"]  += info["observed_input_rate"]
                 tm_network_traffic[tm_id]["out"] += info["observed_output_rate"]
 
-        # Determine which TMs have reached bandwidth limit
         tm_out_saturated = {}
         print(f"\n📊 [真實 Byte 輸出監測] TaskManager 網路狀態:")
         for tm_id, traffic in tm_network_traffic.items():
             limit = self.tm_bandwidth_map.get(tm_id, self.default_bandwidth)
             tm_out_saturated[tm_id] = (traffic["out"] >= limit * 0.95)
+            print(f"   {tm_id}: {traffic['out']/1e6:.2f}MB/s "
+                  f"{'🔴' if tm_out_saturated[tm_id] else '🟢'} (Limit: {limit/1e6:.1f}MB/s)")
 
-            print(f"   {tm_id}: {traffic['out']/1e6:.2f}MB/s {'🔴' if tm_out_saturated[tm_id] else '🟢'} (Limit: {limit/1e6:.1f}MB/s)")
+        # ── STEP 1: 顯性瓶頸偵測 (Explicit Root Cause Identification) ────────
+        # CPU 顯性: Z_busy > threshold 且 T_busy > T_bp  (源頭，非受害者)
+        # Net 顯性: Z_pool > threshold 且 TM 頻寬飽和
+        Priority_1_Migration_List = []  # [(subtask_id, actual_rate, max_capacity)]
 
-        # Step D.2: Subtask-Specific Classification
-        # TODO : 區分瓶頸種類的邏輯要再想想， else的部份要直接剔除瓶頸候選清單嗎？ 主要應該是window_max 不應該被判定成需要轉移
-
-        bottleneck_subtasks = []
-
+        print(f"\n🔍 [STEP 1] 顯性瓶頸偵測 (Z-score + 因果判定):")
         for subtask_id, info in task_info.items():
-            if info["actual_input_rate"] > info["max_capacity"] and info["max_capacity"] > 0:
-                info["is_bottleneck"] = True
-                tm_id = subtask_locations.get(subtask_id, "unknown")
+            T_busy  = info["T_busy"]
+            T_bp    = info["T_bp"]
+            out_pool = info["out_pool_usage"]
+            tm_id   = subtask_locations.get(subtask_id, "unknown")
 
-                # 分類邏輯：CPU vs NETWORK_IN vs NETWORK_OUT  現在只設定network out  不然太複雜
-                # TODO: network 瓶頸 : 頻寬受限 and  bp > busy   我暫時改成 bp>0
-                if tm_out_saturated.get(tm_id, False) and info["T_bp"] > 0:
-                    info["bottleneck_cause"] = "NETWORK_BOTTLENECK" # 輸出頻寬受限
-                else:
+            Z_busy = (T_busy  - mu_busy)  / sigma_busy if sigma_busy >= SIGMA_MIN else 0.0
+            Z_pool = (out_pool - mu_pool) / sigma_pool if sigma_pool >= SIGMA_MIN else 0.0
+            info["Z_busy"] = Z_busy
+            info["Z_pool"] = Z_pool
+
+            # 運算顯性瓶頸: 統計顯著 (Z > 1.0) + 因果判定 (T_busy > T_bp)
+            if Z_busy > Z_THRESHOLD and T_busy > T_bp:
+                info["is_bottleneck"]    = True
+                info["bottleneck_cause"] = "CPU_BOTTLENECK"
+                Priority_1_Migration_List.append(
+                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
+                print(f"  [CPU P1] {subtask_id}: Z_busy={Z_busy:.2f}, "
+                      f"T_busy={T_busy*1000:.0f}ms > T_bp={T_bp*1000:.0f}ms")
+                continue
+
+            # 網路顯性瓶頸: Z_pool 統計顯著 and TM 頻寬飽和
+            if Z_pool > Z_THRESHOLD and tm_out_saturated.get(tm_id, False):
+                info["is_bottleneck"]    = True
+                info["bottleneck_cause"] = "NETWORK_BOTTLENECK"
+                Priority_1_Migration_List.append(
+                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
+                print(f"  [NET P1] {subtask_id}: Z_pool={Z_pool:.2f}, "
+                      f"TM {tm_id} 頻寬飽和")
+                continue
+
+                # 網路顯性瓶頸: Z_pool 統計顯著
+            if Z_pool > Z_THRESHOLD :
+                info["is_bottleneck"]    = True
+                info["bottleneck_cause"] = "NETWORK_BOTTLENECK"
+                Priority_1_Migration_List.append(
+                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
+                print(f"  [NET P1] {subtask_id}: Z_pool={Z_pool:.2f}, "
+                      f"TM {tm_id} outpool滿了")
+                continue
+
+        # ── STEP 2: 隱性瓶頸偵測 (Latent Bottleneck Prediction) ─────────────
+        # 篩選受害者 (T_bp > T_busy)，再以產能還原公式判斷是否會成為顯性瓶頸:
+        #   λ_req = actual_input_rate  (BFS 還原後的上游實際需求)
+        #   λ_max = max_capacity       = observed_rate × (1 + (T_bp+T_idle)/T_busy)
+        #   若 λ_req > λ_max → 修好下游後此算子立刻成為新瓶頸
+        Priority_2_Migration_List = []  # [(subtask_id, lambda_req, lambda_max)]
+
+        print(f"\n🔮 [STEP 2] 隱性瓶頸偵測 (產能還原預測):")
+        for subtask_id, info in task_info.items():
+            if info["is_bottleneck"]:
+                continue  # 已列入 P1，跳過
+
+            T_busy = info["T_busy"]
+            T_bp   = info["T_bp"]
+
+            if T_bp > T_busy and T_busy > 0:
+                lambda_req = info["actual_input_rate"]
+                lambda_max = info["max_capacity"]
+
+                if lambda_req > lambda_max and lambda_max > 0:
                     info["bottleneck_cause"] = "CPU_BOTTLENECK"
+                    Priority_2_Migration_List.append((subtask_id, lambda_req, lambda_max))
+                    print(f"  [LAT P2] {subtask_id}: T_bp={T_bp*1000:.0f}ms > T_busy={T_busy*1000:.0f}ms, "
+                          f"λ_req={lambda_req:.0f} > λ_max={lambda_max:.0f}")
+                else:
+                    info["bottleneck_cause"] = "BACKPRESSURE_VICTIM"
 
-                bottleneck_subtasks.append((subtask_id, info["actual_input_rate"], info["max_capacity"]))
+        # ── 彙整 Migration Lists ─────────────────────────────────────────────
+        bottleneck_subtasks = Priority_1_Migration_List  # 向下相容
 
-        # Generate report
+        p1_id_set = {sid for sid, _, _ in Priority_1_Migration_List}
+        p2_id_set = {sid for sid, _, _ in Priority_2_Migration_List}
+
+        # ── Generate report (format unchanged, add P1/P2 per operator) ───────
         report_list = []
         for op_name in ordered_operators:
             subtasks = operator_groups[op_name]
 
-            # Aggregate statistics for the operator
-            bottleneck_count = sum(1 for st in subtasks if task_info[st]["is_bottleneck"])
-            cpu_bottleneck_count = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "CPU_BOTTLENECK")
+            bottleneck_count         = sum(1 for st in subtasks if task_info[st]["is_bottleneck"])
+            cpu_bottleneck_count     = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "CPU_BOTTLENECK")
             network_bottleneck_count = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "NETWORK_BOTTLENECK")
-            avg_actual_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks) / len(subtasks)
-            avg_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks) / len(subtasks)
-            max_busy = max(task_info[st]["T_busy"] * 1000 for st in subtasks)  # Convert back to ms
-            max_bp = max(task_info[st]["T_bp"] * 1000 for st in subtasks)
+            victim_count             = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "BACKPRESSURE_VICTIM")
+            latent_bottleneck_count  = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "LATENT_BOTTLENECK")
 
-            # Status determination
+            avg_actual_rate  = sum(task_info[st]["actual_input_rate"] for st in subtasks) / len(subtasks)
+            avg_max_capacity = sum(task_info[st]["max_capacity"]       for st in subtasks) / len(subtasks)
+            max_busy = max(task_info[st]["T_busy"] * 1000 for st in subtasks)
+            max_bp   = max(task_info[st]["T_bp"]   * 1000 for st in subtasks)
+
             if bottleneck_count > 0:
                 status = "🔴 BOTTLENECK"
+            elif latent_bottleneck_count > 0:
+                status = "🟠 LATENT_BOTTLENECK"
             elif max_busy > 700:
                 status = "🟠 HIGH_LOAD"
             elif max_bp > 500:
@@ -497,22 +604,31 @@ class FlinkPropose:
             else:
                 status = "🟢 NORMAL"
 
+            op_p1 = [st for st in subtasks if st in p1_id_set]
+            op_p2 = [st for st in subtasks if st in p2_id_set]
+
             report_list.append({
-                "task_name": op_name,
-                "status": status,
-                "bottleneck_count": bottleneck_count,
-                "cpu_bottleneck_count": cpu_bottleneck_count,
+                "task_name":               op_name,
+                "status":                  status,
+                "bottleneck_count":        bottleneck_count,
+                "cpu_bottleneck_count":    cpu_bottleneck_count,
                 "network_bottleneck_count": network_bottleneck_count,
-                "avg_actual_rate": round(avg_actual_rate, 2),
-                "avg_max_capacity": round(avg_max_capacity, 2),
-                "max_busy": round(max_busy, 1),
-                "max_bp": round(max_bp, 1),
-                "subtasks": subtasks
+                "victim_count":            victim_count,
+                "latent_bottleneck_count": latent_bottleneck_count,
+                "avg_actual_rate":         round(avg_actual_rate,  2),
+                "avg_max_capacity":        round(avg_max_capacity, 2),
+                "max_busy":                round(max_busy, 1),
+                "max_bp":                  round(max_bp,   1),
+                "subtasks":                subtasks,
+                "Priority_1_Migration_List": op_p1,
+                "Priority_2_Migration_List": op_p2,
             })
 
-        # Store bottleneck info for migration planning
-        self._bottleneck_subtasks = bottleneck_subtasks
-        self._task_info = task_info
+        # Store for downstream functions
+        self._bottleneck_subtasks   = bottleneck_subtasks
+        self._task_info             = task_info
+        self._priority_1_list       = Priority_1_Migration_List
+        self._priority_2_list       = Priority_2_Migration_List
 
         # --- 紀錄所有 Subtask 的歷史指標 ---
         file_exists = os.path.isfile(log_file)
@@ -531,12 +647,12 @@ class FlinkPropose:
                 writer.writerow([
                     curr_time,
                     sid,
-                    tm_id,
-                    round(info["observed_rate"], 2),
-                    round(info["actual_input_rate"], 2),
-                    round(info["T_busy"], 3),
-                    round(info["T_bp"], 3),
-                    round(info["T_idle"], 3),
+                    subtask_locations.get(sid, "unknown"),
+                    round(info["observed_rate"],       2),
+                    round(info["actual_input_rate"],   2),
+                    round(info["T_busy"],  3),
+                    round(info["T_bp"],    3),
+                    round(info["T_idle"],  3),
                     info["is_bottleneck"],
                     info.get("bottleneck_cause", "NONE")
                 ])
@@ -563,7 +679,7 @@ class FlinkPropose:
 
         # ========== Phase 1: Subtask-Level Evaluation ==========
         print(f"\n🔍 階段 1: Subtask 級別評估 (個別成本效益)")
-        print(f"{'Subtask ID':<30} {'State(MB)':<12} {'BW(MB/s)':<10} {'D_mig':<10} {'D_bot':<10} {'Decision':<15}")
+        print(f"{'Subtask ID':<60} {'State(MB)':<12} {'BW(MB/s)':<10} {'D_mig':<10} {'D_bot':<10} {'Decision':<15}")
         print("=" * 100)
 
         worthy_candidates = []
@@ -596,9 +712,11 @@ class FlinkPropose:
 
             # Phase 1 Decision: Keep only if D_bot > D_mig
             individual_worthy = D_bot > D_mig
+            # ！！！ 先去掉subtask級別評估
+            #individual_worthy = D_bot > 0
             decision = "✅ KEEP" if individual_worthy else "❌ SKIP"
 
-            print(f"{subtask_id:<30} {state_size_mb:>10.2f}  {tm_bandwidth_mb:>8.2f}  {D_mig:>8.2f}  {D_bot:>8.2f}  {decision:<15}")
+            print(f"{subtask_id:<60} {state_size_mb:>10.2f}  {tm_bandwidth_mb:>8.2f}  {D_mig:>8.2f}  {D_bot:>8.2f}  {decision:<15}")
 
             if individual_worthy:
                 worthy_candidates.append(subtask_id)
@@ -685,17 +803,25 @@ class FlinkPropose:
                 tm_network_traffic[tm_resource_id] += traffic_bytes
 
         # R_impact (Impact Range) mapping based on operator position in pipeline
+
         impact_range_map = {
             "Source": 0.0,       # Upstream operators have lower impact
             "Window_Max": 0.25,
             "Window_Join": 0.5,
             "Sink": 0.75          # Downstream operators have higher impact
         }
-
+        """
+        impact_range_map = {
+            "Source": 0.0,       # Upstream operators have lower impact
+            "Window_Auction": 0.25,
+            "Window_Max": 0.5,
+            "Sink": 0.75          # Downstream operators have higher impact
+        }
+        """
         prioritized_list = []
 
         print(f"\n🎯 多維度優先級計算 (Priority = D_overload × (1 + R_impact)):")
-        print(f"{'Subtask ID':<30} {'Cause':<18} {'D_overload':<12} {'R_impact':<10} {'Priority':<10}")
+        print(f"{'Subtask ID':<60} {'Cause':<18} {'D_overload':<12} {'R_impact':<10} {'Priority':<10}")
         print("=" * 95)
 
         for subtask_id in filtered_ids:
@@ -763,7 +889,7 @@ class FlinkPropose:
                 "tm_20c_1": 2.0,
                 "tm_20c_2_net": 2.0,
                 "tm_10c_3_cpu": 1.0,
-                "tm_20c_4": 1.0
+                "tm_20c_4": 2.0
             }
 
             tm_info = {}
@@ -931,10 +1057,12 @@ class FlinkPropose:
         查詢並列印每個 subtask 當前的監控指標：
         busy rate, bp rate, idle rate, observed input rate (bytes/s), 所在 TaskManager
         """
-        busy_map  = self.query_metric_by_task('flink_taskmanager_job_task_busyTimeMsPerSecond')
-        bp_map    = self.query_metric_by_task('flink_taskmanager_job_task_backPressuredTimeMsPerSecond')
-        idle_map  = self.query_metric_by_task('flink_taskmanager_job_task_idleTimeMsPerSecond')
-        rate_map  = self.query_metric_by_task('flink_taskmanager_job_task_numBytesInPerSecond')
+        busy_map     = self.query_metric_by_task('flink_taskmanager_job_task_busyTimeMsPerSecond')
+        bp_map       = self.query_metric_by_task('flink_taskmanager_job_task_backPressuredTimeMsPerSecond')
+        idle_map     = self.query_metric_by_task('flink_taskmanager_job_task_idleTimeMsPerSecond')
+        rate_map     = self.query_metric_by_task('flink_taskmanager_job_task_numBytesInPerSecond')
+        in_pool_map  = self.query_metric_by_task('flink_taskmanager_job_task_buffers_inPoolUsage')
+        out_pool_map = self.query_metric_by_task('flink_taskmanager_job_task_buffers_outPoolUsage')
 
         subtask_locations = self.get_subtask_locations()
 
@@ -942,14 +1070,16 @@ class FlinkPropose:
             print("⚠️ 無法取得監控數據")
             return
 
-        col_w = [55, 10, 10, 10, 16, 20]
+        col_w = [65, 10, 10, 10, 12, 10, 11, 20]
         header = (
             f"{'Subtask ID':<{col_w[0]}}"
             f"{'Busy(ms/s)':>{col_w[1]}}"
             f"{'BP(ms/s)':>{col_w[2]}}"
             f"{'Idle(ms/s)':>{col_w[3]}}"
             f"{'In(MB/s)':>{col_w[4]}}"
-            f"{'TaskManager':>{col_w[5]}}"
+            f"{'inPool':>{col_w[5]}}"
+            f"{'outPool':>{col_w[6]}}"
+            f"{'TaskManager':>{col_w[7]}}"
         )
         print("\n" + "=" * sum(col_w))
         print(header)
@@ -959,12 +1089,14 @@ class FlinkPropose:
         for task_name in sorted(busy_map.keys()):
             for idx in sorted(busy_map[task_name].keys()):
                 subtask_id = f"{task_name}_{idx}"
-                busy  = busy_map.get(task_name, {}).get(idx, 0.0)
-                bp    = bp_map.get(task_name, {}).get(idx, 0.0)
-                idle  = idle_map.get(task_name, {}).get(idx, 0.0)
+                busy       = busy_map.get(task_name, {}).get(idx, 0.0)
+                bp         = bp_map.get(task_name, {}).get(idx, 0.0)
+                idle       = idle_map.get(task_name, {}).get(idx, 0.0)
                 rate_bytes = rate_map.get(task_name, {}).get(idx, 0.0)
-                rate_mb = rate_bytes / (1024 * 1024)
-                tm_id = subtask_locations.get(subtask_id, "unknown")
+                rate_mb    = rate_bytes / (1024 * 1024)
+                in_pool    = in_pool_map.get(task_name, {}).get(idx, 0.0)
+                out_pool   = out_pool_map.get(task_name, {}).get(idx, 0.0)
+                tm_id      = subtask_locations.get(subtask_id, "unknown")
 
                 print(
                     f"{subtask_id:<{col_w[0]}}"
@@ -972,7 +1104,9 @@ class FlinkPropose:
                     f"{bp:>{col_w[2]}.1f}"
                     f"{idle:>{col_w[3]}.1f}"
                     f"{rate_mb:>{col_w[4]}.3f}"
-                    f"{tm_id:>{col_w[5]}}"
+                    f"{in_pool:>{col_w[5]}.3f}"
+                    f"{out_pool:>{col_w[6]}.3f}"
+                    f"{tm_id:>{col_w[7]}}"
                 )
 
         print("=" * sum(col_w) + "\n")
@@ -989,6 +1123,7 @@ class FlinkPropose:
         """
         # Pipeline order: Source -> Window_Max -> Window_Join -> Sink
         target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
+        #target_order = ["Source", "Window_Auction", "Window_Max", "Sink"]
 
         # Extract task name from subtask_id (remove subtask index)
         task_name = "_".join(subtask_id.rsplit("_", 1)[0].split("_"))
@@ -1014,6 +1149,302 @@ class FlinkPropose:
             downstream_keywords.add(target_order[current_pos + 1])
 
         return (upstream_keywords, downstream_keywords)
+
+    def calculate_topology_affinity(self, bottleneck_subtask_id, resource_map, current_locations):
+        """
+        拓撲感知資料引力親和性演算法 (Topology-Aware Data Gravity Affinity)
+
+        針對 Network 瓶頸的遷移目標選擇：
+        將瓶頸 Subtask 遷到「能把最多 Cross-TM 傳輸轉為 Local Exchange」的目標 TM，
+        以最大化記憶體內傳輸、最小化實體網路頻寬消耗。
+
+        支援兩種 Flink 傳輸策略：
+          - FORWARD (1-to-1)：上游 Subtask i 的 100% 輸出只送給下游 Subtask i，
+                              直接賦予下游 Subtask i 所在 TM 滿分引力權重，無需比例推算。
+          - HASH / REBALANCE (M-to-N)：上游輸出按流量比例分散至所有下游 Subtask，
+                              以 actual_input_rate 佔比推算每條 Edge 的引力權重。
+
+        Args:
+            bottleneck_subtask_id : 待遷移的瓶頸 Subtask ID（如 "Window_Join_0"）
+            resource_map          : 目前資源快照
+                                    { rid: {'slots', 'busy_time', 'network_traffic', 'cpu_limit'} }
+            current_locations     : 目前每個 Subtask 所在的 TM { subtask_id: resource_id }
+
+        Returns:
+            (best_tm_id, affinity_scores)
+            best_tm_id      : 通過網路約束且親和力最高的目標 TM；
+                              若無法找到有效 TM 則回傳 None，由呼叫端觸發 CPU 退回機制。
+            affinity_scores : { rid: affinity_score_bytes_per_sec }，供除錯輸出用。
+        """
+        # ══════════════════════════════════════════════════════════════════════
+        # FORWARD 策略白名單 (FORWARD_STRATEGY_TASKS)
+        #
+        # 定義哪些「上游 Task 關鍵字 → 下游 Task 關鍵字」之間採用 FORWARD (1-to-1) 策略。
+        # FORWARD 策略的判定條件：兩端平行度相同，且 Flink 採用 FORWARD 分區策略。
+        # 格式：{ "上游 task_name 的子字串": "對應下游 task_name 的子字串" }
+        #
+        # 範例（請依照實際部署的 Flink Task 名稱填入）：
+        #   "Window_Join" → "Sink" 代表：
+        #       task_name 含 "Window_Join" 的算子，其輸出以 FORWARD 策略傳給含 "Sink" 的算子。
+        # ══════════════════════════════════════════════════════════════════════
+        FORWARD_STRATEGY_TASKS = {
+            # "Window_Join": "Sink",   # ← 範例：請填入您環境的真實 Task 名稱子字串
+            "Window_Join" : "Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer"
+        }
+
+        # ── 基本防衛：確認瓶頸資訊存在 ──────────────────────────────────────
+        if bottleneck_subtask_id not in self._task_info:
+            print(f"   ⚠️ [{bottleneck_subtask_id}] 不在 _task_info，無法計算親和力")
+            return None, {}
+
+        bottleneck_info = self._task_info[bottleneck_subtask_id]
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Step 1: 估算下游節點的傳輸比例 (Proportional Estimation)
+        #         含 FORWARD vs HASH 分流邏輯
+        # ══════════════════════════════════════════════════════════════════════
+
+        # 透過 get_neighbors 取得此 Subtask 的下游算子關鍵字（如 {"Window_Join"}）
+        _, downstream_keywords = self.get_neighbors(bottleneck_subtask_id)
+
+        if not downstream_keywords:
+            # 例如 Sink 算子沒有下游，無法建立親和力分數，退回
+            print(f"   ⚠️ [{bottleneck_subtask_id}] 無下游算子關鍵字，跳過親和力計算")
+            return None, {}
+
+        # 在 _task_info 中找出所有屬於下游算子的 Subtask
+        downstream_subtasks = [
+            sid for sid, info in self._task_info.items()
+            if any(kw in info["task_name"] for kw in downstream_keywords)
+        ]
+
+        if not downstream_subtasks:
+            print(f"   ⚠️ [{bottleneck_subtask_id}] 找不到任何下游 Subtask，跳過親和力計算")
+            return None, {}
+
+        # 取得 S_b 的總輸出流量（Bytes/s），代表它對所有下游的總傳輸量
+        # S_b.numBytesOutPerSecond ≈ observed_output_rate
+        bytes_out_sb = bottleneck_info.get("observed_output_rate", 0.0)
+
+        # ── 判斷此瓶頸 Task 是否在 FORWARD 策略白名單中 ──────────────────────
+        # 取出瓶頸算子的 task_name（subtask_id 格式為 "TaskName_index"，最後一段是數字）
+        bottleneck_task_name = bottleneck_info["task_name"]
+
+        # 取出瓶頸的 subtask_index（用於 FORWARD 策略中的 1-to-1 配對）
+        # subtask_index 儲存在 _task_info 的 "subtask_index" 欄位
+        bottleneck_subtask_index = bottleneck_info.get("subtask_index", -1)
+
+        # 比對白名單：檢查 bottleneck_task_name 是否含有任一 FORWARD 上游關鍵字，
+        # 且其對應的下游關鍵字與 downstream_keywords 有交集
+        is_forward = False
+        forward_downstream_kw = None
+        for upstream_kw, downstream_kw in FORWARD_STRATEGY_TASKS.items():
+            if upstream_kw in bottleneck_task_name and downstream_kw in downstream_keywords:
+                # 確認：此 Task 的確是以 FORWARD 策略對應該下游算子
+                is_forward = True
+                forward_downstream_kw = downstream_kw
+                break
+
+        edge_weights = {}
+
+        if is_forward:
+            # ════════════════════════════════════════════════════════════════
+            # Branch A: FORWARD 策略 (1-to-1 傳輸)
+            #
+            # 上游 Subtask i 的全部輸出只會傳給下游 Subtask i（同 index）。
+            # 因此不需要按比例分攤，直接將 100% 的 bytes_out_sb 賦予
+            # 與 bottleneck_subtask_index 相同的那個下游 Subtask。
+            # 若找不到對應 index 的下游，視為退化情況退回。
+            # ════════════════════════════════════════════════════════════════
+            print(f"\n   📡 [{bottleneck_subtask_id}] Step 1 — Branch A (FORWARD 1-to-1) "
+                  f"尋找下游 index={bottleneck_subtask_index} 的配對 Subtask...")
+
+            # 找出「下游算子中，subtask_index 與瓶頸相同」的唯一一個 Subtask
+            # FORWARD 策略保證上游 i → 下游 i，因此只有一個配對目標
+            matched_forward_sid = None
+            for d_sid in downstream_subtasks:
+                d_info = self._task_info[d_sid]
+                # 僅鎖定屬於 FORWARD 指定下游算子且 index 相符的 Subtask
+                if (forward_downstream_kw in d_info["task_name"]
+                        and d_info.get("subtask_index", -2) == bottleneck_subtask_index):
+                    matched_forward_sid = d_sid
+                    break
+
+            if matched_forward_sid is None:
+                # 找不到配對的下游 Subtask（可能 index 不連續或名稱不符），退回
+                print(f"   ⚠️ [{bottleneck_subtask_id}] Branch A — "
+                      f"找不到 index={bottleneck_subtask_index} 的下游 Subtask，退回比例推算")
+                # 退化處理：fallthrough 到 Branch B（不直接 return，讓後續比例邏輯接管）
+                is_forward = False
+            else:
+                # FORWARD 策略：直接將 100% 輸出流量賦予配對下游 Subtask
+                # EdgeWeight(S_b → d_i) = bytes_out_sb × 100%
+                # 因為沒有任何資料被打散，所有流量都流向這一個下游
+                edge_weights[matched_forward_sid] = bytes_out_sb
+
+                d_tm = current_locations.get(matched_forward_sid, "unknown")
+                print(f"      ✅ 配對成功: {matched_forward_sid:<40} "
+                      f"→ TM: {d_tm:<20} EdgeWeight={bytes_out_sb/1e6:.3f}MB/s (100%)")
+
+        if not is_forward:
+            # ════════════════════════════════════════════════════════════════
+            # Branch B: HASH / REBALANCE 策略 (M-to-N 傳輸，預設情況)
+            #
+            # 因 Flink 無法直接提供 M-to-N 的點對點傳輸量，
+            # 以「各下游 Subtask 的 actual_input_rate 佔比」推算分配比例，
+            # 再乘上 S_b 的總輸出流量，得到每條 Edge 的估計頻寬消耗。
+            # ════════════════════════════════════════════════════════════════
+
+            # 計算下游所有 Subtask 的 actual_input_rate 加總（作為比例分母）
+            # total_downstream_rate = Σ d_i.actual_input_rate
+            total_downstream_rate = sum(
+                self._task_info[d]["actual_input_rate"] for d in downstream_subtasks
+            )
+
+            if total_downstream_rate <= 0:
+                # 分母為 0（下游全部靜止），無法推算比例，退回
+                print(f"   ⚠️ [{bottleneck_subtask_id}] Branch B — 下游 actual_input_rate 總和為 0，退回")
+                return None, {}
+
+            # 計算每條 Edge 的估計傳輸量（Bytes/s）：
+            # EdgeWeight(S_b → d_i) = bytes_out_sb × (d_i.actual_input_rate / total_downstream_rate)
+            # 意義：d_i 消耗的流量佔下游總量的比例，即 S_b 實際分配給 d_i 的輸出量
+            for d_sid in downstream_subtasks:
+                d_rate = self._task_info[d_sid]["actual_input_rate"]
+                # 按下游各 Subtask 的流量比例，估算 S_b 傳給該 Subtask 的資料量
+                edge_weights[d_sid] = bytes_out_sb * (d_rate / total_downstream_rate)
+
+            print(f"\n   📡 [{bottleneck_subtask_id}] Step 1 — Branch B (HASH M-to-N) Edge 權重估算 "
+                  f"(下游總速率={total_downstream_rate/1e6:.2f}MB/s, "
+                  f"S_b 輸出={bytes_out_sb/1e6:.2f}MB/s):")
+            for d_sid, ew in edge_weights.items():
+                d_tm = current_locations.get(d_sid, "unknown")
+                print(f"      {d_sid:<40} → TM: {d_tm:<20} EdgeWeight={ew/1e6:.3f}MB/s")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Step 2: 計算各候選 TM 的親和力總分 (Aggregate Affinity Score)
+        #
+        # AffinityScore(TM_j) = Σ EdgeWeight(S_b → d_i)，for all d_i 位於 TM_j
+        #
+        # 分數越高 = S_b 搬過去後，可省下越多實體網路傳輸（轉為 Local Exchange）
+        # ══════════════════════════════════════════════════════════════════════
+        affinity_scores = {}
+        for rid in resource_map.keys():
+            # 累加所有「目前住在此 TM 上的下游 Subtask」的 EdgeWeight
+            score = sum(
+                ew for d_sid, ew in edge_weights.items()
+                if current_locations.get(d_sid, "unknown") == rid
+            )
+            affinity_scores[rid] = score
+
+        print(f"   🎯 [{bottleneck_subtask_id}] Step 2 — 各 TM 親和力總分 (AffinityScore):")
+        for rid, score in sorted(affinity_scores.items(), key=lambda x: -x[1]):
+            print(f"      {rid:<25}: {score/1e6:.4f}MB/s")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Step 3: 動態網路約束檢查 (Dynamic Network Constraint Check)
+        #
+        # 修正後的物理模型，分兩種情況計算真實的網路增量：
+        #
+        # 情況 A (目標 TM == 瓶頸目前所在 TM)：
+        #   → expected_network_added = 0
+        #   原因：Subtask 留在原地，所有網路流量已反映在目前的監控讀數中，
+        #         resource_map 的 network_traffic 並未重複計算，增量為零。
+        #
+        # 情況 B (目標 TM != 瓶頸目前所在 TM)：
+        #   → expected_network_added = b_total_traffic - (2 × score)
+        #   推導：
+        #     · b_total_traffic = bytes_in_sb + bytes_out_sb（S_b 產生的全部網卡流量）
+        #     · score (AffinityScore) 代表「搬過來後能就地消化的下游流量」，
+        #       此部分原本需要：
+        #         (i)  S_b 透過外部網卡「送出」一次 Egress → 省下 score
+        #         (ii) 下游 Subtask 透過外部網卡「接收」一次 Ingress → 省下 score
+        #       兩端合計省下 2×score 的實體網卡流量，故從增量中扣除兩倍。
+        #     · expected_network_added 可以為負值，代表遷移後目標 TM 的網卡負載
+        #       實際上是「淨減少」的，屬於物理合理情況，不需 clamp 到 0。
+        #
+        # 硬性檢查：current_net + expected_network_added ≤ bw_limit
+        # 超過上限的 TM 直接從候選名單剔除
+        # ══════════════════════════════════════════════════════════════════════
+
+        # 取得 S_b 的輸入流量（Bytes/s）
+        bytes_in_sb = bottleneck_info.get("observed_input_rate", 0.0)
+
+        # S_b 在目前 TM 上產生的全部網卡流量（Ingress + Egress 加總）
+        b_total_traffic = bytes_in_sb + bytes_out_sb
+
+        # 瓶頸 Subtask 目前所在的 TM（用於判斷情況 A / B）
+        b_current_tm_id = current_locations.get(bottleneck_subtask_id, "unknown")
+
+        print(f"   🔒 [{bottleneck_subtask_id}] Step 3 — 網路頻寬約束檢查 "
+              f"(S_b 當前 TM={b_current_tm_id}, "
+              f"in={bytes_in_sb/1e6:.2f}MB/s, out={bytes_out_sb/1e6:.2f}MB/s, "
+              f"total={b_total_traffic/1e6:.2f}MB/s):")
+
+        valid_tms = {}
+        for rid, affinity in affinity_scores.items():
+
+            if rid == b_current_tm_id:
+                # ── 情況 A：目標就是瓶頸原本所在的 TM ────────────────────────
+                # 流量已計入 resource_map，不會產生任何新增的網卡負載，增量為零
+                expected_network_added = 0.0
+                case_label = "A (原地不動)"
+            else:
+                # ── 情況 B：目標是其他 TM ─────────────────────────────────────
+                # 雙倍節省效應：
+                #   · S_b 送出的 score 部分轉為 Local Exchange → 省下 score Egress
+                #   · 下游接收的 score 部分亦轉為 Local Exchange → 省下 score Ingress
+                # 因此從總流量中扣除 2 × score，得到真實的新增網卡負載
+                # 注意：結果可能為負，代表遷移後此 TM 網卡負載淨減少，屬正常現象
+                expected_network_added = b_total_traffic - (2.0 * affinity)
+                case_label = "B (跨 TM 遷移)"
+
+            # 目前此 TM 已累積的網路流量（靜態 Subtask + 已決定的遷移）
+            current_net = resource_map[rid].get("network_traffic", 0.0)
+            # 此 TM 的頻寬硬性上限（Bytes/s）
+            bw_limit = self.tm_bandwidth_map.get(rid, self.default_bandwidth)
+
+            # 預估遷移後的總網路流量（允許 expected_network_added 為負值）
+            projected_net = current_net + expected_network_added
+
+            # 雙倍扣除的明細，方便 debug
+            double_saving = 2.0 * affinity if rid != b_current_tm_id else 0.0
+
+            if projected_net <= bw_limit:
+                valid_tms[rid] = affinity
+                print(f"      ✅ {rid:<25} [{case_label}]: "
+                      f"增量={expected_network_added/1e6:+.3f}MB/s "
+                      f"(total={b_total_traffic/1e6:.3f} - 2×score={double_saving/1e6:.3f}), "
+                      f"預估={projected_net/1e6:.3f}/{bw_limit/1e6:.1f}MB/s → 通過")
+            else:
+                print(f"      ❌ {rid:<25} [{case_label}]: "
+                      f"增量={expected_network_added/1e6:+.3f}MB/s "
+                      f"(total={b_total_traffic/1e6:.3f} - 2×score={double_saving/1e6:.3f}), "
+                      f"預估={projected_net/1e6:.3f}MB/s > 上限={bw_limit/1e6:.1f}MB/s → 剔除")
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Step 4: 貪婪選擇與退回機制 (Greedy Selection & Fallback)
+        #
+        # 在通過 Step 3 的候選 TM 中，選 AffinityScore 最高的作為目標。
+        # 若：(a) 無有效候選、(b) 所有親和力為 0、(c) 無下游資訊
+        # → 回傳 None，由呼叫端退回 CPU 負載均衡邏輯。
+        # ══════════════════════════════════════════════════════════════════════
+        if not valid_tms:
+            # 所有 TM 均無法通過頻寬約束，退回 CPU 負載均衡
+            print(f"   ⚠️ [{bottleneck_subtask_id}] Step 4 — 無有效 TM（均超過頻寬上限），退回 CPU 負載均衡")
+            return None, affinity_scores
+
+        if all(score == 0.0 for score in valid_tms.values()):
+            # 所有親和力均為 0（下游不在任何候選 TM 上），親和力無法區分，退回 CPU 負載均衡
+            print(f"   ⚠️ [{bottleneck_subtask_id}] Step 4 — 所有有效 TM 親和力皆為 0，退回 CPU 負載均衡")
+            return None, affinity_scores
+
+        # 在通過約束的 TM 中，選擇親和力分數最高者（最大化 Local Exchange 節省量）
+        best_tm = max(valid_tms, key=lambda rid: valid_tms[rid])
+        print(f"   ✅ [{bottleneck_subtask_id}] Step 4 — 拓撲親和力選定目標 TM: "
+              f"{best_tm} (AffinityScore={valid_tms[best_tm]/1e6:.4f}MB/s)")
+
+        return best_tm, affinity_scores
 
     def generate_migration_plan(self, prioritized_list=None):
         """
@@ -1129,60 +1560,65 @@ class FlinkPropose:
             # Get neighbors for topology scoring
             upstream_keywords, downstream_keywords = self.get_neighbors(subtask_id)
 
-            # ===== 7. Evaluate all TMs and find best match =====
+            # ===== 6.5 若為 Network 瓶頸，優先使用拓撲親和力演算法 =====
+            # 呼叫 calculate_topology_affinity，透過資料引力分數找到最佳目標 TM，
+            # 以最大化 Local Exchange、最小化實體網路頻寬消耗。
+            # 若演算法找不到有效目標（退回條件：無下游、頻寬全滿、親和力全為 0），
+            # 則 network_affinity_success = False，後續退回使用 CPU 負載均衡邏輯。
+            network_affinity_success = False
             best_tm = None
             best_score = -float('inf')
-            scores_log = []
 
-            for rid, res in resource_map.items():
-                # 依照各個 TM 計算  Projected resources after adding this subtask
-                # 轉向目標機器的預估負載
-                busy_on_target = per_busy_rate / res['cpu_limit']
-                projected_slots = res['slots'] + 1
-                projected_busy = res['busy_time'] + busy_on_target
-                projected_traffic = res['network_traffic'] + subtask_traffic
+            if cause == "NETWORK_BOTTLENECK":
+                print(f"\n🌐 [{subtask_id}] 偵測為 Network 瓶頸，啟動拓撲親和力演算法...")
+                affinity_best_tm, affinity_scores = self.calculate_topology_affinity(
+                    subtask_id, resource_map, current_locations
+                )
+                # 拓撲演算法回傳有效 TM，且 Slot 數量未超限（硬約束驗證）
+                if affinity_best_tm and resource_map.get(affinity_best_tm, {}).get('slots', MAX_SLOTS_PER_TM) + 1 <= MAX_SLOTS_PER_TM:
+                    best_tm = affinity_best_tm
+                    network_affinity_success = True
+                    print(f"   ✅ 拓撲親和力演算法成功，直接選定 TM: {best_tm}，跳過貪婪評分迴圈")
+                else:
+                    # 退回：拓撲演算法未能找到有效 TM，改用 CPU 負載均衡邏輯
+                    print(f"   ⚠️ 拓撲親和力演算法退回，改用 CPU 負載均衡邏輯作為備援")
 
-                # Check hard constraints
-                if projected_slots > MAX_SLOTS_PER_TM:
-                    continue  # Violates slot limit
+            # ===== 7. Evaluate all TMs and find best match =====
+            # 執行條件：
+            #   (a) CPU 瓶頸 → 一律執行此迴圈，使用 CPU 分數選擇最佳 TM
+            #   (b) Network 瓶頸且拓撲演算法已成功 → 跳過（best_tm 已由拓撲演算法設定）
+            #   (c) Network 瓶頸且拓撲演算法退回 → 執行此迴圈，以 CPU 分數作為備援依據
+            if not network_affinity_success:
+                for rid, res in resource_map.items():
+                    # 依照各個 TM 計算 Projected resources after adding this subtask
+                    # 轉向目標機器的預估負載
+                    busy_on_target = per_busy_rate / res['cpu_limit']
+                    projected_slots = res['slots'] + 1
+                    projected_busy = res['busy_time'] + busy_on_target
+                    projected_traffic = res['network_traffic'] + subtask_traffic
 
-                # ===== 9. Multi-Factor Scoring =====
-                # CPU Score: 算剩餘可用 (1 - projected_busy / 6000)  6個slot 各1000
-                cpu_score = 1 - (projected_busy / (res['cpu_limit']*1000))
+                    # 硬約束：Slot 數量不可超限
+                    if projected_slots > MAX_SLOTS_PER_TM:
+                        continue  # Violates slot limit
 
-                # Net Score: (1 - projected_traffic / bandwidth_limit)
-                tm_limit = self.tm_bandwidth_map.get(rid, self.default_bandwidth)
-                net_score = 1 - (projected_traffic / tm_limit)
+                    # ===== 9. Multi-Factor Scoring =====
+                    # CPU Score: 剩餘可用 CPU 比例 (1 - 已投影負載 / 該 TM 的 CPU 上限×1000ms)
+                    # 分數越高代表該 TM 越空閒，越適合承接新的運算負載
+                    cpu_score = 1 - (projected_busy / (res['cpu_limit'] * 1000))
 
-                # Topo Score: Communication Affinity (based on current migration_plan)
-                topo_score = 0.0
-                # Check if this TM hosts upstream or downstream neighbors
-                for other_subtask_id, other_rid in migration_plan.items():
-                    if other_rid == rid and other_subtask_id != subtask_id:
-                        # Check if other_subtask is a neighbor
-                        if other_subtask_id in self._task_info:
-                            other_task_name = self._task_info[other_subtask_id]['task_name']
-                            # Check if upstream neighbor
-                            for upstream_kw in upstream_keywords:
-                                if upstream_kw in other_task_name:
-                                    topo_score += 1.0
-                            # Check if downstream neighbor
-                            for downstream_kw in downstream_keywords:
-                                if downstream_kw in other_task_name:
-                                    topo_score += 1.0
+                    # Net Score: 剩餘可用頻寬比例 (1 - 已投影流量 / 頻寬上限)
+                    # 用於確認候選 TM 有足夠頻寬餘裕，不可為負（會被硬約束擋住）
+                    tm_limit = self.tm_bandwidth_map.get(rid, self.default_bandwidth)
+                    net_score = 1 - (projected_traffic / tm_limit)
 
-                # 在滿足網路頻寬需求的前提下 選擇cpu score最大者
-                if net_score > 0.0:
-                    if cause == "CPU_BOTTLENECK" :
+                    # 至少候選 TM 的 CPU 上限要 ≥ 瓶頸 Subtask 原本所在 TM 的 CPU 上限
+                    # 並且頻寬餘量必須為正（不超過頻寬上限）
+                    if net_score > 0.0 and res['cpu_limit'] >= cpu_limit:
+                        # CPU 瓶頸 或 Network 瓶頸退回情況：
+                        # 統一以「CPU 剩餘容量分數」作為貪婪選擇依據，選擇最空閒的 TM
                         if cpu_score > best_score:
                             best_score = cpu_score
                             best_tm = rid
-
-                    elif cause == "NETWORK_BOTTLENECK":
-                        if cpu_score >0:
-                            if topo_score > best_score:
-                                best_score = topo_score
-                                best_tm = rid
 
 
             # ===== 10. Allocation Decision & Immediate Feedback Update =====
@@ -1555,24 +1991,29 @@ class FlinkPropose:
                 icon = "⚠️"
                 reason = "原因未知"
 
-            print(f"   {icon} {subtask_id}: 實際輸入 {actual_rate:.2f} rec/s > 最大容量 {max_capacity:.2f} rec/s (過載 {overload_pct:.1f}%)")
+            cmp_sym = ">" if actual_rate > max_capacity else "<"
+            print(f"   {icon} {subtask_id}: 實際輸入 {actual_rate:.2f} rec/s {cmp_sym} 最大容量 {max_capacity:.2f} rec/s (過載 {overload_pct:.1f}%)")
             print(f"      原因: {reason}")
-
+        '''
         # Step 2: Two-tier migration trigger evaluation
         print("\n" + "=" * 100)
         print("STEP 2: 兩階段遷移觸發評估")
         print("=" * 100)
+        
         should_trigger, final_candidates = self.evaluate_migration_trigger(self._bottleneck_subtasks)
 
         if not should_trigger:
             print("\n⚠️ 全局觸發條件未滿足，不執行遷移")
             return False
-
+        '''
         # Step 3: Multi-dimensional prioritization
         print("\n" + "=" * 100)
-        print("STEP 3: 多維度優先級排序")
+        #print("STEP 3: 多維度優先級排序")
+        print("STEP 3: 繞過觸發評估，直接進行多維度優先級排序")
         print("=" * 100)
-        prioritized_list = self.get_prioritized_list(final_candidates)
+        bottleneck_ids = [sid for sid, _, _ in self._bottleneck_subtasks]
+        prioritized_list = self.get_prioritized_list(bottleneck_ids)
+        # prioritized_list = self.get_prioritized_list(final_candidates)
 
         if not prioritized_list:
             print("⚠️ 優先級列表為空")

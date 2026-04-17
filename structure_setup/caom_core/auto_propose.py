@@ -8,7 +8,7 @@ import sys
 import os
 import time
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from propose_2 import FlinkPropose
+from propose_v3 import FlinkPropose
 
 def main():
     print("=== propose 自動遷移系統 ===")
@@ -44,19 +44,20 @@ def main():
     CHECK_INTERVAL = 20       # 每 20 秒檢查一次
 
     print(f"📊 監控參數:")
-    print(f"   - Busy 閾值: {BUSY_THRESHOLD} ms/s")
-    print(f"   - Skew 閾值: {SKEW_THRESHOLD} ms/s")
     print(f"   - 檢查間隔: {CHECK_INTERVAL} 秒")
     print(f"   - 遷移計畫路徑: {propose.migration_plan_path}")
     print(f"   - Savepoint 目錄: {propose.savepoint_dir}")
     print("\n開始監控...\n")
 
-    time.sleep(100)
+    time.sleep(10)
 
     try:
         while True:
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n[{timestamp}] Propose 檢查叢集狀態...")
+
+            # 顯示每個 subtask 的即時監控指標
+            propose.print_subtask_status()
 
             # 顯示當前狀態
             reports = propose.detect_bottleneck()

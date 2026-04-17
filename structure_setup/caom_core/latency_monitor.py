@@ -8,16 +8,20 @@ import os
 # === 設定區 ===
 PROM_URL = "http://localhost:9090"
 JOB_NAME = "Nexmark_Q7_Isolated__Benchmark_Driver_"
+#JOB_NAME = "Nexmark_Q5_Isolated__Migration_Test_"
 # TODO: 每次實驗結果放入不同資料夾
-OUTPUT_FILE = "/home/yenwei/research/structure_setup/output/t12_1"
-OUTPUT_CSV = "/home/yenwei/research/structure_setup/output/t12_1/latency_data.csv"
+OUTPUT_FILE = "/home/yenwei/research/structure_setup/output/t13_6_caom2"
+OUTPUT_CSV = "/home/yenwei/research/structure_setup/output/t13_6_caom2/latency_data.csv"
 SAMPLE_INTERVAL = 2
 
-QUERY_TOTAL_LATENCY = f"""
-  max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{JOB_NAME}"}}) 
-  + 
-  max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{JOB_NAME}"}})
-"""
+#QUERY_TOTAL_LATENCY = f"""
+#  max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{JOB_NAME}"}})
+#  +
+#  max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{JOB_NAME}"}})
+#"""
+
+QUERY_TOTAL_LATENCY = f'max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{JOB_NAME}"}}) '
+#Inner_latency = f'max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{JOB_NAME}"}})'
 THROUGHPUT_Q = f'sum(flink_taskmanager_job_task_numRecordsOutPerSecond{{job_name="{JOB_NAME}", task_name=~".*Source.*"}})'
 
 # TODO : throughput 到底是看輸入還是輸出 因為資料會放大 輸出會變成20倍

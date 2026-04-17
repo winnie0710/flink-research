@@ -291,7 +291,7 @@ public class BenchmarkIsoQ7 {
             // [關鍵修正] 修改 Name 以適配 FlinkRestClient 的搜尋規則
             // 很多 FlinkRestClient 實作會尋找開頭為 "Source:" 的 Operator
             DataStream<Event> events = env
-                    .fromSource(source, WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofSeconds(5)), "Source: KafkaSource")
+                    .fromSource(source, WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofMillis(200)), "Source: KafkaSource")
                     .name("Source: KafkaSource")
                     .uid("source-uid")
                     .slotSharingGroup("ingest-group");
@@ -334,17 +334,18 @@ public class BenchmarkIsoQ7 {
             // -------------------------------------------------------------------------
             // 4. Sink 設定
             // -------------------------------------------------------------------------
-            //Properties sinkProperties = new Properties();   # 設定批次發送電腦好像無法負荷
-            // [關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
+            Properties sinkProperties = new Properties();   // 設定批次發送電腦好像無法負荷
+            //[關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
             // 這會犧牲一點點延遲(Latency)，換取巨大的吞吐量(Throughput)提升
-            //sinkProperties.setProperty("linger.ms", "1");
+            sinkProperties.setProperty("linger.ms", "10");
             // [關鍵優化 2] Batch Size: 加大批次大小 (先設 16KB )
-            //sinkProperties.setProperty("batch.size", "16384");
+            sinkProperties.setProperty("batch.size", "131072");
             // [關鍵優化 3] 壓縮: 減少網路傳輸量 (推薦 lz4 或 snappy，CPU 開銷極低)
-            //sinkProperties.setProperty("compression.type", "lz4");
+            sinkProperties.setProperty("compression.type", "lz4");
             // [選用] ACK 設定: 1 代表 Leader 收到就好，all 代表所有副本都要收到 (較慢但安全)
             // 配合 AT_LEAST_ONCE，Flink 會確保資料不掉，設為 1 通常效能較好
-            //sinkProperties.setProperty("acks", "1");
+            sinkProperties.setProperty("acks", "1");
+            sinkProperties.setProperty("buffer.memory", "67108864"); // 64MB 緩衝
 
             KafkaSink<String> sink = KafkaSink.<String>builder()
                     .setBootstrapServers(kafkaBootstrap)
@@ -353,7 +354,7 @@ public class BenchmarkIsoQ7 {
                             .setValueSerializationSchema(new SimpleStringSchema())
                             .build())
                     .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
-                    //.setKafkaProducerConfig(sinkProperties)
+                    .setKafkaProducerConfig(sinkProperties)
                     .build();
 
             highestBids.sinkTo(sink)

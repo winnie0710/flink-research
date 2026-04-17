@@ -50,6 +50,7 @@ def main():
     print(f"   - 遷移計畫路徑: {detector.migration_plan_path}")
     print(f"   - Savepoint 目錄: {detector.savepoint_dir}")
     print("\n開始監控...\n")
+    time.sleep(10)
 
     try:
         while True:

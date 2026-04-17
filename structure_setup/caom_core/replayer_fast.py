@@ -9,22 +9,22 @@ BOOTSTRAP_SERVERS = 'localhost:9093'
 TOPIC_NAME = 'nexmark-events'
 
 # 速率控制 (正弦波)
-MIN_TPS = 80000
-MAX_TPS = 100000
-PERIOD_SECONDS = 60
+MIN_TPS = 20000
+MAX_TPS = 50000
+PERIOD_SECONDS = 30
 OFFSET = (MAX_TPS + MIN_TPS) // 2
 AMPLITUDE = (MAX_TPS - MIN_TPS) // 2
 
 # 路徑
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
-DATA_FILE_PATH = os.path.join(PROJECT_ROOT, 'source', 'nexmark_data_4.json')
+DATA_FILE_PATH = os.path.join(PROJECT_ROOT, 'source', 'nexmark_data_2.json')
 
 # Kafka 配置 (維持你的高效能設定)
 conf = {
     'bootstrap.servers': BOOTSTRAP_SERVERS,
     'client.id': 'python-optimized-producer',
-    'linger.ms': 20,
+    'linger.ms': 10,
     'batch.size': 131072,
     'compression.type': 'gzip',
     'queue.buffering.max.messages': 2000000,

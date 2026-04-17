@@ -80,6 +80,8 @@ services:
     hostname: tm-20c-1
     container_name: tm-20c-1
     command: taskmanager
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./config/tm-20c-1-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
@@ -140,6 +142,8 @@ services:
     hostname: tm-10c-3-cpu
     container_name: tm-10c-3-cpu
     command: taskmanager
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./config/tm-10c-3-cpu-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - ./config/config.yaml:/opt/flink/conf/config.yaml
@@ -190,7 +194,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: '2'
 
   # --------------------
   # 4. Monitoring (Prometheus + Grafana)

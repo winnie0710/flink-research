@@ -191,6 +191,19 @@ public class BenchmarkIsoQ5 {
                     .uid("window-max-uid")
                     .slotSharingGroup("max-group");
 
+            Properties sinkProperties = new Properties();
+            //[關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
+            // 這會犧牲一點點延遲(Latency)，換取巨大的吞吐量(Throughput)提升
+            sinkProperties.setProperty("linger.ms", "10");
+            // [關鍵優化 2] Batch Size: 加大批次大小 (先設 16KB )
+            sinkProperties.setProperty("batch.size", "131072");
+            // [關鍵優化 3] 壓縮: 減少網路傳輸量 (推薦 lz4 或 snappy，CPU 開銷極低)
+            sinkProperties.setProperty("compression.type", "lz4");
+            // [選用] ACK 設定: 1 代表 Leader 收到就好，all 代表所有副本都要收到 (較慢但安全)
+            // 配合 AT_LEAST_ONCE，Flink 會確保資料不掉，設為 1 通常效能較好
+            sinkProperties.setProperty("acks", "1");
+            sinkProperties.setProperty("buffer.memory", "67108864"); // 64MB 緩衝
+
             // 4. Sink
             KafkaSink<String> sink = KafkaSink.<String>builder()
                     .setBootstrapServers(kafkaBootstrap)
@@ -199,6 +212,7 @@ public class BenchmarkIsoQ5 {
                             .setValueSerializationSchema(new SimpleStringSchema())
                             .build())
                     .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
+                    .setKafkaProducerConfig(sinkProperties)
                     .build();
 
             hotItems.sinkTo(sink).name("Sink: KafkaSink").uid("sink-uid").slotSharingGroup("sink-group");
@@ -269,5 +283,54 @@ public class BenchmarkIsoQ5 {
     }
 
     // --- 保持原有的 printSummary 和 Helper 方法 ---
-    // (省略其餘與原檔相同的 printSummary, printLine, getOptions 等方法)
+    public static void printSummary(LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
+        if (totalMetrics.isEmpty()) return;
+        System.err.println("-------------------------------- Nexmark Results --------------------------------");
+        if (totalMetrics.values().iterator().next().getEventsNum() != 0) {
+            printEventNumSummary(totalMetrics);
+        } else {
+            printTPSSummary(totalMetrics);
+        }
+    }
+
+    private static void printEventNumSummary(LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
+        int[] itemMaxLength = {7, 18, 9, 11, 18, 15, 18};
+        printLine('-', "+", itemMaxLength, "", "", "", "", "", "", "");
+        printLine(' ', "|", itemMaxLength, " Query", " Events Num", " Cores", " Time(s)", " Cores * Time(s)", " Throughput ", " Throughput/Cores");
+        printLine('-', "+", itemMaxLength, "", "", "", "", "", "", "");
+        for (Map.Entry<String, JobBenchmarkMetric> entry : totalMetrics.entrySet()) {
+            JobBenchmarkMetric m = entry.getValue();
+            double tps = m.getEventsNum() / m.getTimeSeconds();
+            printLine(' ', "|", itemMaxLength, entry.getKey(), NUMBER_FORMAT.format(m.getEventsNum()), NUMBER_FORMAT.format(m.getCpu()), formatDoubleValue(m.getTimeSeconds()), formatDoubleValue(m.getCoresMultiplyTimeSeconds()), formatLongValuePerSecond((long) tps), formatLongValuePerSecond((long) (m.getEventsNum() / m.getCoresMultiplyTimeSeconds())));
+        }
+    }
+
+    private static void printTPSSummary(LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
+        int[] itemMaxLength = {7, 18, 10, 18};
+        printLine('-', "+", itemMaxLength, "", "", "", "");
+        printLine(' ', "|", itemMaxLength, " Query", " Throughput (r/s)", " Cores", " Throughput/Cores");
+        printLine('-', "+", itemMaxLength, "", "", "", "");
+        for (Map.Entry<String, JobBenchmarkMetric> entry : totalMetrics.entrySet()) {
+            JobBenchmarkMetric m = entry.getValue();
+            printLine(' ', "|", itemMaxLength, entry.getKey(), m.getPrettyTps(), m.getPrettyCpu(), m.getPrettyTpsPerCore());
+        }
+    }
+
+    private static void printLine(char charToFill, String separator, int[] itemMaxLength, String... items) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < items.length; i++) {
+            builder.append(separator).append(items[i]);
+            for (int j = 0; j < itemMaxLength[i] - items[i].length() - separator.length(); j++) builder.append(charToFill);
+        }
+        builder.append(separator);
+        System.err.println(builder.toString());
+    }
+
+    private static Options getOptions() {
+        Options options = new Options();
+        options.addOption(QUERIES);
+        options.addOption(CATEGORY);
+        options.addOption(LOCATION);
+        return options;
+    }
 }

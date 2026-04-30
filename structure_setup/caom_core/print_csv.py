@@ -5,13 +5,13 @@ import os
 # === 設定區 ===
 # 請在此替換成你實際的檔案路徑
 FILES = {
-    'Native Flink': '/home/yenwei/research/structure_setup/output/t6_native/latency_data.csv',
-    'Proposed': '/home/yenwei/research/structure_setup/output/t6_caom_2/latency_data.csv',
-    'CAOM': '/home/yenwei/research/structure_setup/output/t6_2/latency_data.csv'
+    'Native Flink': '/home/yenwei/research/structure_setup/output/t13_6_native/latency_data.csv',
+    'CAOM': '/home/yenwei/research/structure_setup/output/t13_6_caom2/latency_data.csv',
+    'Proposed': '/home/yenwei/research/structure_setup/output/t13_6/latency_data.csv'
 }
 
-OUTPUT_DIR = "/home/yenwei/research/structure_setup/output/compare"
-X_LIMIT = (0, 300)  # 固定橫軸範圍
+OUTPUT_DIR = "/home/yenwei/research/structure_setup/output/compare/t13_6"
+X_LIMIT = (0, 400)  # 固定橫軸範圍
 
 def load_and_plot():
     # 確保輸出目錄存在
@@ -22,7 +22,7 @@ def load_and_plot():
     fig_tp, ax_tp = plt.subplots(figsize=(10, 6))
 
     # 定義顏色循環
-    colors = ['#7f7f7f', '#ff7f0e', '#1f77b4'] # 灰色, 橘色, 藍色 (模擬圖10配色)
+    colors = ['#7f7f7f', '#1f77b4','#ff7f0e'] # 灰色, 藍色, 橘色 (模擬圖10配色)
 
     for (label, path), color in zip(FILES.items(), colors):
         if not os.path.exists(path):
@@ -47,25 +47,25 @@ def load_and_plot():
     ax_lat.set_xlim(X_LIMIT)
     ax_lat.set_xlabel('Time (s)', fontsize=12)
     ax_lat.set_ylabel('Total Latency (ms)', fontsize=12)
-    ax_lat.set_title('Total Latency Variation Comparison (0-300s)', fontsize=14)
+    ax_lat.set_title('Total Latency Variation Comparison (0-500s)', fontsize=14)
     ax_lat.grid(True, linestyle='--', alpha=0.6)
     ax_lat.legend()
     fig_lat.tight_layout()
-    fig_lat.savefig(os.path.join(OUTPUT_DIR, 'comparison_latency_300s_1.png'))
+    fig_lat.savefig(os.path.join(OUTPUT_DIR, 'comparison_latency.png'))
 
     # --- 格式化 Throughput 圖表 ---
     ax_tp.set_xlim(X_LIMIT)
     ax_tp.set_xlabel('Time (s)', fontsize=12)
     ax_tp.set_ylabel('Throughput (records/s)', fontsize=12)
-    ax_tp.set_title('Throughput Performance Comparison (0-300s)', fontsize=14)
+    ax_tp.set_title('Throughput Performance Comparison (0-500s)', fontsize=14)
     ax_tp.grid(True, linestyle='--', alpha=0.6)
     ax_tp.legend()
     fig_tp.tight_layout()
-    fig_tp.savefig(os.path.join(OUTPUT_DIR, 'comparison_throughput_300s_1.png'))
+    fig_tp.savefig(os.path.join(OUTPUT_DIR, 'comparison_throughput.png'))
 
     print(f"\n✅ 對比圖表已生成於: {OUTPUT_DIR}")
-    print(f"   1. comparison_latency_300s.png")
-    print(f"   2. comparison_throughput_300s.png")
+    print(f"   1. comparison_latency.png")
+    print(f"   2. comparison_throughput.png")
 
 if __name__ == "__main__":
     load_and_plot()

@@ -5,17 +5,27 @@ import json
 import time
 import os
 import subprocess
+import argparse
 
 """
-加入 topology affinity 函式 forward 的綁在一起
-分成顯性瓶頸和隱性瓶頸 
-顯性用 Z-score 異常檢測法
-隱性用 待修正
-後面和 v3 相同
+用caom基礎+細粒度挑選 分類並扣處不滿足計算or網路瓶頸的
+加入網路拓補
 """
 
-log_file = "/home/yenwei/research/structure_setup/output/t14_4/subtask_metrics_history.csv"
-detail_log = "/home/yenwei/research/structure_setup/output/t14_4/migration_details.csv"
+JOB_CONFIG = {
+    "q4": {
+        "job_name": "Nexmark_Q4_Isolated__Benchmark_Driver_",
+        "target_order": ["Source", "Join", "Max", "Avg", "Sink"],
+        "entry_class": "com.github.nexmark.flink.BenchmarkIsoQ4",
+        "queries_arg": "q4-isolated",
+    },
+    "q7": {
+        "job_name": "Nexmark_Q7_Isolated__Benchmark_Driver_",
+        "target_order": ["Source", "Window_Max", "Window_Join", "Sink"],
+        "entry_class": "com.github.nexmark.flink.BenchmarkIsoQ7",
+        "queries_arg": "q7-isolated",
+    },
+}
 
 def format_bytes(bytes_value):
     """將字節轉換為人類可讀的格式"""
@@ -76,7 +86,8 @@ class FlinkPropose:
     AVERAGE_RECORD_SIZE = 100  # bytes per record (default assumption 確實一筆資料大約 100 byte)
     SOURCE_MAX_TPS = 12_000_000  # bytes/s，全局 Source 總速率上限，防止 busyTime 極小時速率失真
 
-    def __init__(self, prometheus_url="http://localhost:9090",
+    def __init__(self, query_type="q7", output_id="t16",
+                 prometheus_url="http://localhost:9090",
                  flink_rest_url="http://localhost:8081",
                  migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
                  savepoint_dir="file:///opt/flink/savepoints",
@@ -90,28 +101,46 @@ class FlinkPropose:
         self._bottleneck_subtasks = []  # bottleneck detection results
         self._task_info = {}  # Task information from detection
 
+        # Load query-specific config from JOB_CONFIG
+        cfg = JOB_CONFIG[query_type]
+        self.query_type = query_type
+        self.job_name = cfg["job_name"]
+        self.target_order = cfg["target_order"]
+
+        # Dynamic output paths
+        output_dir = f"/home/yenwei/research/structure_setup/output/{output_id}/"
+        os.makedirs(output_dir, exist_ok=True)
+        self.log_file = os.path.join(output_dir, f"metrics_{query_type}.csv")
+        self.detail_log = os.path.join(output_dir, f"migration_details_{query_type}.csv")
+
+        print(f"[FlinkPropose] Monitoring job : {self.job_name}")
+        print(f"[FlinkPropose] Metrics CSV    : {self.log_file}")
+        print(f"[FlinkPropose] Details CSV    : {self.detail_log}")
+
         # Job configuration for auto-restart from savepoint
         self.job_config = job_config or {
             "container": "jobmanager",
-            "entry_class": "com.github.nexmark.flink.BenchmarkIsoQ7",
+            "entry_class": cfg["entry_class"],
             "parallelism": 4,
             "jar_path": "/opt/flink/usrlib/nexmark.jar",
             "nexmark_conf_dir": "/opt/nexmark",
             "program_args": [
-                "--queries", "q7-isolated",
+                "--queries", cfg["queries_arg"],
                 "--location", "/opt/nexmark",
                 "--suite-name", "100m",
                 "--category", "oa",
-                "--kafka-server", "kafka:9092"
+                "--kafka-server", "kafka:9092",
+                "--submit-only"
             ]
         }
         self.tm_bandwidth_map = {      # (單位 Bytes/sec)
-            "tm_20c_1": 31250000,      # 250mbit
-            "tm_20c_2_net": 18750000,  # 150mbit
-            "tm_10c_3_cpu": 31250000,  # 250mbit
-            "tm_20c_4": 18750000       # 150mbit
+            "tm_20c_1":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
+            "tm_20c_2":     int(18.75 * 1024 * 1024),  # 150 Mbit/s = 18.75 MB/s   ← network-constrained TM
+            "tm_20c_3":     int(18.75 * 1024 * 1024),   # 150 Mbit/s = 18.75 MB/s  ← network-constrained TM
+            "tm_20c_4":     int(37.5 * 1024 * 1024),  # 300 Mbit/s = 37.5 MB/s
+            "tm_20c_5":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
         }
-        self.default_bandwidth = 31250000 # 預設值
+        self.default_bandwidth = int(37.5 * 1024 * 1024) # 預設值
 
     def query_metric_by_task(self, query):
         """
@@ -284,9 +313,6 @@ class FlinkPropose:
         My propose Bottleneck Detection: Identify all potential bottleneck operators in a single pass
         Uses backpressure recovery to calculate actual input rates and max processing capacity
         """
-        # Reset bottleneck list for this iteration
-        self._bottleneck_subtasks = []
-
         # Query all required metrics
         busy_data_map = self.query_metric_by_task('flink_taskmanager_job_task_busyTimeMsPerSecond')
         bp_data_map = self.query_metric_by_task('flink_taskmanager_job_task_backPressuredTimeMsPerSecond')
@@ -294,8 +320,9 @@ class FlinkPropose:
         # 除了 In，也要抓取 Out 指標 (sink 用 in , 其他用out  )
         rate_in_map = self.query_metric_by_task('flink_taskmanager_job_task_numBytesInPerSecond')
         rate_out_map = self.query_metric_by_task('flink_taskmanager_job_task_numBytesOutPerSecond')
-        outPoolUsage = self.query_metric_by_task('flink_taskmanager_job_task_buffers_outPoolUsage')
-        inPoolUsage = self.query_metric_by_task('flink_taskmanager_job_task_buffers_inPoolUsage')
+        # 15秒內最大值 因為是瞬間 Gauge 值（當下 buffer 佔用比例），沒有任何內建平滑機制，一個 slot 清空或填滿都會造成 0→1 的跳躍
+        outPoolUsage = self.query_metric_by_task('max_over_time(flink_taskmanager_job_task_buffers_outPoolUsage[15s])')
+        inPoolUsage = self.query_metric_by_task('max_over_time(flink_taskmanager_job_task_buffers_inPoolUsage[15s])')
         # 輸入輸出資料
 
         # 獲取狀態大小（用於遷移代價評估）
@@ -361,6 +388,7 @@ class FlinkPropose:
                 }
 
         # Step A: Recover actual source rate 由 source 開始 其他用 BFS 搭配 out/in 推算
+        # TODO source 用背壓還原後過大 真的直接這樣算嗎？ 設T_busy保底 ？？
         # Identify source operators (those with "Source" in name)
         source_tasks = {k: v for k, v in task_info.items() if "Source" in v["task_name"]}
 
@@ -370,30 +398,19 @@ class FlinkPropose:
             observed_rate = info["observed_rate"]
 
             if T_busy > 0:
-                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)
-                # print(f"  Source: {subtask_id} T_busy = {T_busy} T_bp = {T_bp} observed_rate = {observed_rate}")
+                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)  只考慮被「反壓」擋住的資料。
+                print(f"  Source: {subtask_id} T_busy = {T_busy} T_bp = {T_bp} observed_rate = {observed_rate}")
                 T_busy = max(T_busy, 0.15)  # 保底 150ms，防止分母過小導致速率爆炸
                 actual_source_rate = observed_rate * (1 + T_bp / T_busy)
+
                 info["actual_input_rate"] = actual_source_rate
-                # print(f"  還原速率 Source: {subtask_id} actual_input_rate = {actual_source_rate:.0f}, T_busy = {T_busy}")
+                print(f" 過高 Source: {subtask_id} actual_input_rate = {actual_source_rate}, T_busy = {T_busy}")
             else:
                 info["actual_input_rate"] = observed_rate
-        """
-        # Step A.1: Proportional Capping — 防止 busyTime 極小時 Source 速率失真
-        total_source_rate = sum(info["actual_input_rate"] for info in source_tasks.values())
-        if total_source_rate > self.SOURCE_MAX_TPS and total_source_rate > 0:
-            scale = self.SOURCE_MAX_TPS / total_source_rate
-            print(f"\n  [Proportional Capping] 還原總速率 {total_source_rate/1e6:.2f} MB/s > 上限 {self.SOURCE_MAX_TPS/1e6:.2f} MB/s，縮放比例 = {scale:.4f}")
-            for subtask_id, info in source_tasks.items():
-                before = info["actual_input_rate"]
-                info["actual_input_rate"] *= scale
-                print(f"    {subtask_id}: {before:.0f} -> {info['actual_input_rate']:.0f} bytes/s")
-        """
+
         # Step B: Recover actual input rate for all operators using BFS
         # Build adjacency list based on typical Flink pipeline order
-        target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
-        #q5
-        #target_order = ["Source", "Window_Auction", "Window_Max", "Sink"]
+        # (uses self.target_order; matching is case-insensitive)
 
         # Group tasks by operator type
         operator_groups = {}
@@ -405,9 +422,9 @@ class FlinkPropose:
 
         # Order operators by pipeline position
         ordered_operators = []
-        for keyword in target_order:
+        for keyword in self.target_order:
             for op_name in operator_groups.keys():
-                if keyword in op_name and op_name not in ordered_operators:
+                if keyword.lower() in op_name.lower() and op_name not in ordered_operators:
                     ordered_operators.append(op_name)
 
         # Add any remaining operators
@@ -415,9 +432,13 @@ class FlinkPropose:
             if op_name not in ordered_operators:
                 ordered_operators.append(op_name)
 
+        # Persist for use in calculate_topology_impact
+        self._ordered_operators = ordered_operators
+
         # Propagate actual input rates downstream
         # TODO : BFS 也要設防爆門檻 ratio 嗎？
         # TODO : 「應該不用」建立「多對多」的拓撲視圖 ，針對多輸入算子（如 Window_Join 同時接收來自兩個算子流的情況），目前的公式確實會失效，因為它假設了「一對一」的上下游關係。
+
 
         for i in range(1, len(ordered_operators)):
             upstream_op = ordered_operators[i - 1]
@@ -434,7 +455,7 @@ class FlinkPropose:
                 for subtask_id in current_subtasks:
                     observed_rate = task_info[subtask_id]["observed_rate"]
                     # λ̂_i = λ̂_upstream × (observed_rate_i / observed_rate_upstream)
-                    # 計算每個subtask的 actual input rate, 一樣是用operator的輸入輸出比例執行BFS 但依照本operator的各個subtask本身比例 分配計算後的輸入速率
+                    # 計算每個subtask的 actual input rate, 一樣是用operator的輸入輸出比例執行BFS 但依照本operator的各個subtask資料比例 分配計算後的輸入速率
                     ratio = observed_rate / upstream_avg_observed if upstream_avg_observed > 0 else 1
                     task_info[subtask_id]["actual_input_rate"] = upstream_avg_actual * (observed_rate / upstream_avg_observed) if upstream_avg_observed > 0 else observed_rate
                     # print(f"   {upstream_op} -> {current_op}: {subtask_id}, ratio= {ratio} - actual_input_rate = {task_info[subtask_id]['actual_input_rate']}")
@@ -442,6 +463,7 @@ class FlinkPropose:
         # Step C: Calculate max capacity for all subtasks
         for subtask_id, info in task_info.items():
             T_busy = info["T_busy"]
+            T_busy = max(T_busy, 0.15)  # 保底 150ms，防止分母過小導致速率爆炸
             T_bp = info["T_bp"]
             T_idle = info["T_idle"]
             observed_rate = info["observed_rate"]
@@ -454,151 +476,82 @@ class FlinkPropose:
 
             info["max_capacity"] = max_capacity
 
-        # ── STEP 0: 全域指標正則化 (Z-score Normalization) ─────────────────
-        Z_THRESHOLD = 1.0    # 1-sigma: 前 ~16% 最忙碌視為統計顯著
-        SIGMA_MIN   = 0.001  # σ 過小代表負載均勻，停用 Z-score 判斷以防抖動
-
-        all_T_busy  = [info["T_busy"]        for info in task_info.values()]
-        all_pool_out = [info["out_pool_usage"] for info in task_info.values()]
-
-        mu_busy  = sum(all_T_busy)   / len(all_T_busy)   if all_T_busy   else 0.0
-        mu_pool  = sum(all_pool_out) / len(all_pool_out) if all_pool_out else 0.0
-
-        def _std(values, mean_val):
-            if len(values) < 2:
-                return 0.0
-            return (sum((x - mean_val) ** 2 for x in values) / len(values)) ** 0.5
-
-        sigma_busy = _std(all_T_busy,   mu_busy)
-        sigma_pool = _std(all_pool_out, mu_pool)
-
-        print(f"\n📊 [STEP 0] Z-score 正則化: "
-              f"μ_busy={mu_busy*1000:.1f}ms σ_busy={sigma_busy*1000:.1f}ms | "
-              f"μ_pool={mu_pool:.3f} σ_pool={sigma_pool:.3f}")
-        if sigma_busy < SIGMA_MIN:
-            print("   ⚠️ σ_busy 過小 (負載均勻)，CPU Z-score 判斷停用")
-        if sigma_pool < SIGMA_MIN:
-            print("   ⚠️ σ_pool 過小，Network Z-score 判斷停用")
-
-        # TM-level network saturation (needed for explicit network detection)
+        # Step D: Hierarchical Diagnosis - Two-Branch Logic
+        # Step D.1: Get subtask locations and TM-level network traffic
         subtask_locations = self.get_subtask_locations()
 
-        tm_network_traffic = {}
+        # Calculate total network traffic per TaskManager
+        # TODO : 每個TM都爆掉 不是這樣吧？
+        tm_network_traffic = {}  # {tm_resource_id: total_bytes_per_sec}
+        # 遍歷所有 subtask ，找出其所在的 tm_resource_id 後，將流量累加到該 TM 的總值中。
         for subtask_id, info in task_info.items():
             tm_id = subtask_locations.get(subtask_id, "unknown")
             if tm_id != "unknown":
                 if tm_id not in tm_network_traffic:
                     tm_network_traffic[tm_id] = {"in": 0.0, "out": 0.0}
-                tm_network_traffic[tm_id]["in"]  += info["observed_input_rate"]
+                tm_network_traffic[tm_id]["in"] += info["observed_input_rate"]
                 tm_network_traffic[tm_id]["out"] += info["observed_output_rate"]
 
+        # Determine which TMs have reached bandwidth limit
         tm_out_saturated = {}
         print(f"\n📊 [真實 Byte 輸出監測] TaskManager 網路狀態:")
         for tm_id, traffic in tm_network_traffic.items():
             limit = self.tm_bandwidth_map.get(tm_id, self.default_bandwidth)
             tm_out_saturated[tm_id] = (traffic["out"] >= limit * 0.95)
-            print(f"   {tm_id}: {traffic['out']/1e6:.2f}MB/s "
-                  f"{'🔴' if tm_out_saturated[tm_id] else '🟢'} (Limit: {limit/1e6:.1f}MB/s)")
 
-        # ── STEP 1: 顯性瓶頸偵測 (Explicit Root Cause Identification) ────────
-        # CPU 顯性: Z_busy > threshold 且 T_busy > T_bp  (源頭，非受害者)
-        # Net 顯性: Z_pool > threshold 且 TM 頻寬飽和
-        Priority_1_Migration_List = []  # [(subtask_id, actual_rate, max_capacity)]
+            print(f"   {tm_id}: {traffic['out']/1e6:.2f}MB/s {'🔴' if tm_out_saturated[tm_id] else '🟢'} (Limit: {limit/1e6:.1f}MB/s)")
 
-        print(f"\n🔍 [STEP 1] 顯性瓶頸偵測 (Z-score + 因果判定):")
-        for subtask_id, info in task_info.items():
-            T_busy  = info["T_busy"]
-            T_bp    = info["T_bp"]
-            out_pool = info["out_pool_usage"]
-            tm_id   = subtask_locations.get(subtask_id, "unknown")
+        # Step D.2: Operator-level bottleneck check (baseline logic)
+        # 先在 operator 層級判斷：total_actual > total_max → 整個 operator 的 subtask 都進入候選集
+        bottleneck_candidate_ids = set()
+        for op_name in ordered_operators:
+            subtasks = operator_groups[op_name]
+            total_actual = sum(task_info[st]["actual_input_rate"] for st in subtasks)
+            total_max = sum(task_info[st]["max_capacity"] for st in subtasks)
+            if total_actual > total_max and total_max > 0:
+                print(f"Operator '{op_name}' is a bottleneck (total_actual={total_actual:.2f}, total_max={total_max:.2f})")
+                for subtask_id in subtasks:
+                    bottleneck_candidate_ids.add(subtask_id)
 
-            Z_busy = (T_busy  - mu_busy)  / sigma_busy if sigma_busy >= SIGMA_MIN else 0.0
-            Z_pool = (out_pool - mu_pool) / sigma_pool if sigma_pool >= SIGMA_MIN else 0.0
-            info["Z_busy"] = Z_busy
-            info["Z_pool"] = Z_pool
+        # Step D.3: Subtask-Specific Classification
+        # 對候選集內的每個 subtask 進一步分類；兩者條件都不滿足則從瓶頸集合中剔除
+        bottleneck_subtasks = []
 
-            # 運算顯性瓶頸: 統計顯著 (Z > 1.0) + 因果判定 (T_busy > T_bp)
-            if Z_busy > Z_THRESHOLD and T_busy > T_bp:
-                info["is_bottleneck"]    = True
-                info["bottleneck_cause"] = "CPU_BOTTLENECK"
-                Priority_1_Migration_List.append(
-                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
-                print(f"  [CPU P1] {subtask_id}: Z_busy={Z_busy:.2f}, "
-                      f"T_busy={T_busy*1000:.0f}ms > T_bp={T_bp*1000:.0f}ms")
-                continue
+        for subtask_id in bottleneck_candidate_ids:
+            info = task_info[subtask_id]
+            tm_id = subtask_locations.get(subtask_id, "unknown")
 
-            # 網路顯性瓶頸: Z_pool 統計顯著 and TM 頻寬飽和
-            if Z_pool > Z_THRESHOLD and tm_out_saturated.get(tm_id, False):
-                info["is_bottleneck"]    = True
-                info["bottleneck_cause"] = "NETWORK_BOTTLENECK"
-                Priority_1_Migration_List.append(
-                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
-                print(f"  [NET P1] {subtask_id}: Z_pool={Z_pool:.2f}, "
-                      f"TM {tm_id} 頻寬飽和")
-                continue
-
-                # 網路顯性瓶頸: Z_pool 統計顯著
-            if Z_pool > Z_THRESHOLD :
-                info["is_bottleneck"]    = True
-                info["bottleneck_cause"] = "NETWORK_BOTTLENECK"
-                Priority_1_Migration_List.append(
-                    (subtask_id, info["actual_input_rate"], info["max_capacity"]))
-                print(f"  [NET P1] {subtask_id}: Z_pool={Z_pool:.2f}, "
-                      f"TM {tm_id} outpool滿了")
-                continue
-
-        # ── STEP 2: 隱性瓶頸偵測 (有效利用率 Effective Utilization) ──────────
-        # u_effective = T_busy / (1 - T_bp)，排除反壓佔用時間後的真實 CPU 壓力
-        # 觸發條件：u_effective > 0.85 且 T_bp > 0.1 (有明顯反壓且 CPU 高負載)
-        Priority_2_Migration_List = []  # [(subtask_id, u_effective, u_effective)]
-
-        print(f"\n🔮 [STEP 2] 隱性瓶頸偵測 (有效利用率閥值 > 0.85):")
-        for subtask_id, info in task_info.items():
-            if info["is_bottleneck"]:
-                continue  # 已列入 P1，跳過
-
-            T_busy = info["T_busy"]
-            T_bp   = info["T_bp"]
-
-            free_time = 1.0 - T_bp
-            u_effective = T_busy / free_time if free_time > 0 else 1.0
-
-            if u_effective > 0.85 and T_bp > 0.1:
+            # 分類邏輯：CPU vs NETWORK_OUT
+            if info["out_pool_usage"] >= 1 and info["T_bp"] > 0:
+                info["bottleneck_cause"] = "NETWORK_BOTTLENECK"  # 輸出端緩衝區滿了
                 info["is_bottleneck"] = True
+                bottleneck_subtasks.append((subtask_id, info["actual_input_rate"], info["max_capacity"]))
+            elif info["T_busy"] > info["T_bp"] and info["in_pool_usage"] >= 0.1:
                 info["bottleneck_cause"] = "CPU_BOTTLENECK"
-                Priority_2_Migration_List.append((subtask_id, u_effective, u_effective))
-                self._bottleneck_subtasks.append((subtask_id, "CPU", u_effective))
-                print(f"  [LAT P2] {subtask_id}: u_eff={u_effective:.3f} > 0.85, "
-                      f"T_bp={T_bp*1000:.0f}ms > 100ms (T_busy={T_busy*1000:.0f}ms)")
-            elif T_bp > T_busy:
-                info["bottleneck_cause"] = "BACKPRESSURE_VICTIM"
+                info["is_bottleneck"] = True
+                bottleneck_subtasks.append((subtask_id, info["actual_input_rate"], info["max_capacity"]))
+            else:
+                # 兩者條件都不滿足，從瓶頸集合中剔除
+                info["is_bottleneck"] = False
+                print(f"   Subtask '{subtask_id}' excluded from bottleneck set (neither CPU nor NETWORK condition met)")
 
-        # ── 彙整 Migration Lists ─────────────────────────────────────────────
-        bottleneck_subtasks = Priority_1_Migration_List  # 向下相容
-
-        p1_id_set = {sid for sid, _, _ in Priority_1_Migration_List}
-        p2_id_set = {sid for sid, _, _ in Priority_2_Migration_List}
-
-        # ── Generate report (format unchanged, add P1/P2 per operator) ───────
+        # Generate report
         report_list = []
         for op_name in ordered_operators:
             subtasks = operator_groups[op_name]
 
-            bottleneck_count         = sum(1 for st in subtasks if task_info[st]["is_bottleneck"])
-            cpu_bottleneck_count     = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "CPU_BOTTLENECK")
+            # Aggregate statistics for the operator
+            bottleneck_count = sum(1 for st in subtasks if task_info[st]["is_bottleneck"])
+            cpu_bottleneck_count = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "CPU_BOTTLENECK")
             network_bottleneck_count = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "NETWORK_BOTTLENECK")
-            victim_count             = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "BACKPRESSURE_VICTIM")
-            latent_bottleneck_count  = sum(1 for st in subtasks if task_info[st].get("bottleneck_cause") == "LATENT_BOTTLENECK")
+            avg_actual_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks) / len(subtasks)
+            avg_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks) / len(subtasks)
+            max_busy = max(task_info[st]["T_busy"] * 1000 for st in subtasks)  # Convert back to ms
+            max_bp = max(task_info[st]["T_bp"] * 1000 for st in subtasks)
 
-            avg_actual_rate  = sum(task_info[st]["actual_input_rate"] for st in subtasks) / len(subtasks)
-            avg_max_capacity = sum(task_info[st]["max_capacity"]       for st in subtasks) / len(subtasks)
-            max_busy = max(task_info[st]["T_busy"] * 1000 for st in subtasks)
-            max_bp   = max(task_info[st]["T_bp"]   * 1000 for st in subtasks)
-
+            # Status determination
             if bottleneck_count > 0:
                 status = "🔴 BOTTLENECK"
-            elif latent_bottleneck_count > 0:
-                status = "🟠 LATENT_BOTTLENECK"
             elif max_busy > 700:
                 status = "🟠 HIGH_LOAD"
             elif max_bp > 500:
@@ -606,64 +559,42 @@ class FlinkPropose:
             else:
                 status = "🟢 NORMAL"
 
-            op_p1 = [st for st in subtasks if st in p1_id_set]
-            op_p2 = [st for st in subtasks if st in p2_id_set]
-
             report_list.append({
-                "task_name":               op_name,
-                "status":                  status,
-                "bottleneck_count":        bottleneck_count,
-                "cpu_bottleneck_count":    cpu_bottleneck_count,
+                "task_name": op_name,
+                "status": status,
+                "bottleneck_count": bottleneck_count,
+                "cpu_bottleneck_count": cpu_bottleneck_count,
                 "network_bottleneck_count": network_bottleneck_count,
-                "victim_count":            victim_count,
-                "latent_bottleneck_count": latent_bottleneck_count,
-                "avg_actual_rate":         round(avg_actual_rate,  2),
-                "avg_max_capacity":        round(avg_max_capacity, 2),
-                "max_busy":                round(max_busy, 1),
-                "max_bp":                  round(max_bp,   1),
-                "subtasks":                subtasks,
-                "Priority_1_Migration_List": op_p1,
-                "Priority_2_Migration_List": op_p2,
+                "avg_actual_rate": round(avg_actual_rate, 2),
+                "avg_max_capacity": round(avg_max_capacity, 2),
+                "max_busy": round(max_busy, 1),
+                "max_bp": round(max_bp, 1),
+                "subtasks": subtasks
             })
 
-        # Store for downstream functions
-        # P2 implicit bottlenecks already appended in STEP 2.
-        # Now append P1 explicit bottlenecks with normalized pressure scores.
-        for subtask_id, actual_rate, max_capacity in Priority_1_Migration_List:
-            info = task_info[subtask_id]
-            cause = info.get("bottleneck_cause", "CPU_BOTTLENECK")
-            score = info["T_busy"] if "CPU" in cause else info.get("out_pool_usage", 0.5)
-            self._bottleneck_subtasks.append((subtask_id, cause, score))
-        self._task_info             = task_info
-        self._priority_1_list       = Priority_1_Migration_List
-        self._priority_2_list       = Priority_2_Migration_List
+        # Store bottleneck info for migration planning
+        self._bottleneck_subtasks = bottleneck_subtasks
+        self._task_info = task_info
 
-        # --- 紀錄所有 Subtask 的歷史指標 ---
-        file_exists = os.path.isfile(log_file)
+        # --- 紀錄所有 Subtask 的動畫狀態 ---
+        file_exists = os.path.isfile(self.log_file)
         curr_time = time.time()
 
-        with open(log_file, "a", newline="") as f:
+        with open(self.log_file, "a", newline="") as f:
             writer = csv.writer(f)
             if not file_exists:
-                writer.writerow([
-                    "timestamp", "subtask_id", "tm_id", "observed_rate",
-                    "actual_input_rate", "busy_rate", "bp_rate", "idle_rate",
-                    "is_bottleneck", "cause"
-                ])
+                writer.writerow(["timestamp", "subtask_id", "current_tm", "status"])
 
             for sid, info in task_info.items():
-                writer.writerow([
-                    curr_time,
-                    sid,
-                    subtask_locations.get(sid, "unknown"),
-                    round(info["observed_rate"],       2),
-                    round(info["actual_input_rate"],   2),
-                    round(info["T_busy"],  3),
-                    round(info["T_bp"],    3),
-                    round(info["T_idle"],  3),
-                    info["is_bottleneck"],
-                    info.get("bottleneck_cause", "NONE")
-                ])
+                cause = info.get("bottleneck_cause", "NONE")
+                if cause == "CPU_BOTTLENECK":
+                    status = "CPU_Bottleneck"
+                elif cause == "NETWORK_BOTTLENECK":
+                    status = "NET_Bottleneck"
+                else:
+                    status = "Healthy"
+                current_tm = subtask_locations.get(sid, "unknown")
+                writer.writerow([curr_time, sid, current_tm, status])
 
         return report_list
 
@@ -721,20 +652,22 @@ class FlinkPropose:
 
     def calculate_topology_impact(self, subtask_id):
         """
-        依 Operator 在 Pipeline 中的位置回傳拓撲影響力分數 (0.0 ~ 1.0)。
-        越靠近 Sink 的算子影響力越大（下游瓶頸波及範圍更廣）。
+        動態計算拓撲影響力：(該 operator 在 DAG 中的深度 / DAG 最大深度)
+        結果範圍：0.0 (Source) ~ 1.0 (Sink)
+        依賴 detect_bottleneck 執行後存入 self._ordered_operators 的有序算子列表。
         """
-        impact_range_map = {
-            "Source":     0.0,
-            "Window_Max": 0.25,
-            "Window_Join": 0.5,
-            "Sink":       0.75,
-        }
+        ordered = getattr(self, "_ordered_operators", [])
+        max_depth = len(ordered) - 1
+        if max_depth <= 0:
+            return 0.0
+
         task_name = self._task_info.get(subtask_id, {}).get("task_name", "")
-        for keyword, impact_value in impact_range_map.items():
-            if keyword in task_name:
-                return impact_value
-        return 0.0
+        try:
+            depth = ordered.index(task_name)
+        except ValueError:
+            return 0.0
+
+        return depth / max_depth
 
     def get_prioritized_list(self, filtered_ids):
         """
@@ -812,7 +745,7 @@ class FlinkPropose:
             })
 
             cause_display = cause.replace("_BOTTLENECK", "")
-            print(f"{sid:<30} {cause_display:<18} {d_overload:>10.3f}  {r_impact:>8.2f}  {priority_score:>8.3f}")
+            print(f"{sid:<60} {cause_display:<18} {d_overload:>10.3f}  {r_impact:>8.2f}  {priority_score:>8.3f}")
 
         # Sort by priority score descending
         entries.sort(key=lambda x: x['priority_score'], reverse=True)
@@ -837,9 +770,10 @@ class FlinkPropose:
             # Note: resourceId 格式可能是 tm-20c-1 或 tm_20c_1，需要兼容兩種格式
             cpu_capacity_map = {
                 "tm_20c_1": 2.0,
-                "tm_20c_2_net": 2.0,
-                "tm_10c_3_cpu": 1.0,
-                "tm_20c_4": 2.0
+                "tm_20c_2": 2.0,
+                "tm_20c_3": 2.0,
+                "tm_20c_4": 1.0,
+                "tm_20c_5": 1.0
             }
 
             tm_info = {}
@@ -1071,17 +1005,15 @@ class FlinkPropose:
         Returns:
             Tuple (upstream_task_names: set, downstream_task_names: set)
         """
-        # Pipeline order: Source -> Window_Max -> Window_Join -> Sink
-        target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
-        #target_order = ["Source", "Window_Auction", "Window_Max", "Sink"]
+        # Pipeline order from self.target_order (case-insensitive matching)
 
         # Extract task name from subtask_id (remove subtask index)
         task_name = "_".join(subtask_id.rsplit("_", 1)[0].split("_"))
 
         # Find current position in pipeline
         current_pos = -1
-        for i, keyword in enumerate(target_order):
-            if keyword in task_name:
+        for i, keyword in enumerate(self.target_order):
+            if keyword.lower() in task_name.lower():
                 current_pos = i
                 break
 
@@ -1091,12 +1023,12 @@ class FlinkPropose:
         # Identify upstream (previous operators in pipeline)
         upstream_keywords = set()
         if current_pos > 0:
-            upstream_keywords.add(target_order[current_pos - 1])
+            upstream_keywords.add(self.target_order[current_pos - 1])
 
         # Identify downstream (next operators in pipeline)
         downstream_keywords = set()
-        if current_pos < len(target_order) - 1:
-            downstream_keywords.add(target_order[current_pos + 1])
+        if current_pos < len(self.target_order) - 1:
+            downstream_keywords.add(self.target_order[current_pos + 1])
 
         return (upstream_keywords, downstream_keywords)
 
@@ -1500,7 +1432,7 @@ class FlinkPropose:
             return None
         # TODO 除了slot數量限制，不要用硬約束，用軟約束 ＋ 評分機制
         # ===== Hard Constraints =====
-        MAX_SLOTS_PER_TM = 6
+        MAX_SLOTS_PER_TM = 5
         # CPU_HEADROOM_LIMIT = 800  # ms (changed from 850 to 800 as per requirement)
 
         # ===== 1. 初始化資源地圖 (乾淨基線) 可用 busy rate 是 6000 =====
@@ -1632,8 +1564,8 @@ class FlinkPropose:
             up_info   = self._task_info.get(subtask_id, {})
             dn_info   = self._task_info.get(paired_downstream_id, {})
             bundle_external_traffic = (
-                up_info.get('observed_input_rate',  0.0) +   # 上游 Ingress（外部進入）
-                dn_info.get('observed_output_rate', 0.0)     # 下游 Egress（外部送出）
+                    up_info.get('observed_input_rate',  0.0) +   # 上游 Ingress（外部進入）
+                    dn_info.get('observed_output_rate', 0.0)     # 下游 Egress（外部送出）
                 # 注意：up.numBytesOut ≈ dn.numBytesIn（兩者之間的 FORWARD 流量）
                 #       已被 Local Exchange 吸收，不出現在外部頻寬計算中
             )
@@ -2095,25 +2027,17 @@ class FlinkPropose:
             if not running_jobs: return False
             job_id = running_jobs[0]
 
-        # --- 新增：紀錄遷移路徑細節 ---
-        current_locations = self.get_subtask_locations()
-        detail_exists = os.path.isfile(detail_log)
-        event_time = time.time()
-
-        with open(detail_log, "a", newline="") as f:
+        # --- 標記遷移中的 Subtask 狀態 ---
+        migration_ts = time.time()
+        current_locs = self.get_subtask_locations()
+        file_exists = os.path.isfile(self.log_file)
+        with open(self.log_file, "a", newline="") as f:
             writer = csv.writer(f)
-            if not detail_exists:
-                writer.writerow(["event_timestamp", "subtask_id", "from_tm", "to_tm", "cause", "state_size_mb"])
-
+            if not file_exists:
+                writer.writerow(["timestamp", "subtask_id", "current_tm", "status"])
             for sid, target_tm in migration_plan.items():
-                original_tm = current_locations.get(sid, "unknown")
-                if target_tm != original_tm:
-                    # 只有真正有搬動的才紀錄
-                    info = self._task_info.get(sid, {})
-                    cause = info.get("bottleneck_cause", "UNKNOWN")
-                    state_mb = info.get("state_size", 0) / (1024*1024)
-
-                    writer.writerow([event_time, sid, original_tm, target_tm, cause, round(state_mb, 2)])
+                if current_locs.get(sid) != target_tm:
+                    writer.writerow([migration_ts, sid, current_locs.get(sid, "unknown"), "Migrating"])
 
         # --- 遷移計時開始 ---
         # 紀錄絕對時間戳記 (Epoch time)，用於與 latency_monitor 對齊
@@ -2149,9 +2073,9 @@ class FlinkPropose:
         total_downtime = end_migration - start_migration
 
         # === 紀錄詳細中斷時間至 CSV (用於實驗分析) ===
-        log_file = "/home/yenwei/research/structure_setup/output/propose_migration_performance.csv"
-        file_exists = os.path.isfile(log_file)
-        with open(log_file, "a", newline="") as f:
+        perf_log_file = "/home/yenwei/research/structure_setup/output/propose_migration_performance.csv"
+        file_exists = os.path.isfile(perf_log_file)
+        with open(perf_log_file, "a", newline="") as f:
             writer = csv.writer(f)
             if not file_exists:
                 writer.writerow(["event_timestamp", "total_downtime", "savepoint_time", "resource_wait_time", "restart_time", "job_id"])
@@ -2170,15 +2094,13 @@ class FlinkPropose:
     def auto_detect_and_migrate(self, busy_threshold=None, skew_threshold=None):
         """
         5-Step Migration Workflow:
-        1 & 2: detect_bottleneck  — 更新 self._bottleneck_subtasks (顯性 + 隱性)
+        1 & 2: detect_bottleneck  — 從operator級別進一步篩選subbtask
         3:     evaluate_migration_trigger — 全域守門員
         4:     get_prioritized_list — 多維度優先級排序
         5:     generate_migration_plan — 貪婪分配
         """
-        # STEP 1 & 2: 瓶頸偵測 (顯性 Z-score + 隱性有效利用率)
-        # 更新 self._bottleneck_subtasks 包含顯性與隱性瓶頸
         print("=" * 100)
-        print("STEP 1 & 2: 瓶頸偵測 (顯性 Z-score + 隱性有效利用率)")
+        print("STEP 1 & 2: 瓶頸偵測 ")
         print("=" * 100)
         reports = self.detect_bottleneck()
 
@@ -2235,4 +2157,52 @@ class FlinkPropose:
             print("⚠️ 取消遷移觸發，避免無意義的中斷。")
             return False
 
+        # --- 紀錄四階段決策過程 (動畫用) ---
+        detail_exists = os.path.isfile(self.detail_log)
+        event_time = time.time()
+        current_locations = self.get_subtask_locations()
+
+        with open(self.detail_log, "a", newline="") as f:
+            writer = csv.writer(f)
+            if not detail_exists:
+                writer.writerow(["timestamp", "decision_step", "subtask_id", "priority_rank", "from_tm", "to_tm", "decision_reason"])
+
+            # Step: Diagnosis
+            for subtask_id, _, _ in self._bottleneck_subtasks:
+                info = self._task_info.get(subtask_id, {})
+                cause = info.get("bottleneck_cause", "UNKNOWN")
+                cause_label = "CPU Overload" if "CPU" in cause else "Network Overload"
+                writer.writerow([event_time, "Diagnosis", subtask_id, "", current_locations.get(subtask_id, "unknown"), "", f"Detected {cause_label}"])
+
+            # Step: Prioritization
+            for rank, (subtask_id, priority_score) in enumerate(prioritized_list, start=1):
+                info = self._task_info.get(subtask_id, {})
+                cause = info.get("bottleneck_cause", "UNKNOWN")
+                d_label = "D_overload" if "CPU" in cause else "D_overload(net)"
+                writer.writerow([event_time, "Prioritization", subtask_id, rank, current_locations.get(subtask_id, "unknown"), "", f"Priority={priority_score:.3f} ({d_label}, Rank {rank})"])
+
+            # Step: Assignment
+            for subtask_id, target_tm in migration_plan.items():
+                original_tm = current_locations.get(subtask_id, "unknown")
+                if target_tm != original_tm:
+                    info = self._task_info.get(subtask_id, {})
+                    cause = info.get("bottleneck_cause", "UNKNOWN")
+                    reason = "max absolute CPUscore" if "CPU" in cause else "network topology affinity"
+                    writer.writerow([event_time, "Assignment", subtask_id, "", original_tm, target_tm, f"{target_tm} selected due to {reason}"])
+
         return self.trigger_migration(migration_plan)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CAOM Flink Bottleneck Detector")
+    parser.add_argument("--query", required=True, choices=["q4", "q7"],
+                        help="Nexmark query to monitor (q4 or q7)")
+    parser.add_argument("--id", dest="output_id", default="t16",
+                        help="Experiment output folder name (default: t16)")
+    args = parser.parse_args()
+
+    detector = FlinkPropose(query_type=args.query, output_id=args.output_id)
+
+    while True:
+        detector.auto_detect_and_migrate()
+        time.sleep(30)

@@ -6,7 +6,7 @@ taskmanager:
     process:
       size: 8g
   bind-host: 0.0.0.0
-  numberOfTaskSlots: 6
+  numberOfTaskSlots: 5
 jobmanager:
   execution:
     failover-strategy: region

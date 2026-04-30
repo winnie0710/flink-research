@@ -72,7 +72,7 @@ services:
   # 3. TaskManagers
   # --------------------
 
-  # TM A: 2 核心
+  # TM 1: 2 核心
   tm-20c-1:
     build:
       context: .
@@ -94,7 +94,7 @@ services:
       #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=5
       - TM_RESOURCE_ID=tm-20c-1
     depends_on:
       - jobmanager
@@ -103,13 +103,13 @@ services:
         limits:
           cpus: '2'
 
-  # TM B: 2 核心 (模擬網路瓶頸)
-  tm-20c-2-net:
+  # TM 2: 2 核心 (模擬網路瓶頸)
+  tm-20c-2:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: tm-20c-2-net
-    container_name: tm-20c-2-net
+    hostname: tm-20c-2
+    container_name: tm-20c-2
     command: taskmanager
     cap_add:
       - NET_ADMIN
@@ -125,8 +125,8 @@ services:
       #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
-      - TM_RESOURCE_ID=tm-20c-2-net
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=5
+      - TM_RESOURCE_ID=tm-20c-2
     depends_on:
       - jobmanager
     deploy:
@@ -134,13 +134,13 @@ services:
         limits:
           cpus: '2'
 
-  # TM C: 1 核心 (模擬 CPU 瓶頸)
-  tm-10c-3-cpu:
+  # TM 3: 2 核心 (模擬網路瓶頸)
+  tm-20c-3:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: tm-10c-3-cpu
-    container_name: tm-10c-3-cpu
+    hostname: tm-20c-3
+    container_name: tm-20c-3
     command: taskmanager
     cap_add:
       - NET_ADMIN
@@ -156,16 +156,16 @@ services:
       #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
-      - TM_RESOURCE_ID=tm-10c-3-cpu
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=5
+      - TM_RESOURCE_ID=tm-20c-3
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: '2'
 
-  # TM D: 1 核心  (模擬網路瓶頸)
+  # TM 4: 1 核心 (模擬 CPU 瓶頸)
   tm-20c-4:
     build:
       context: .
@@ -187,14 +187,45 @@ services:
       #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
     environment:
       - JOB_MANAGER_RPC_ADDRESS=jobmanager
-      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=6
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=5
       - TM_RESOURCE_ID=tm-20c-4
     depends_on:
       - jobmanager
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: '1'
+
+  # TM 5: 1 核心 (模擬 CPU 瓶頸)
+  tm-20c-5:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    hostname: tm-20c-5
+    container_name: tm-20c-5
+    command: taskmanager
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./config/tm-20c-5-flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+      - ./config/config.yaml:/opt/flink/conf/config.yaml
+      - ./jobs/flink-sql-connector-kafka-3.1.0-1.18.jar:/opt/flink/lib/kafka.jar
+      - ./jobs/nexmark-flink-0.3-SNAPSHOT.jar:/opt/flink/usrlib/nexmark.jar
+      - ./jobs/nexmark.yaml:/opt/nexmark/nexmark.yaml
+      - ./plan:/opt/flink/plan
+      - ./save:/opt/flink/savepoints
+      - ./jobs/flink-runtime-1.19.0.jar:/opt/flink/lib/flink-custom-runtime.jar
+      #- ./jobs/bash-java-utils.jar:/opt/flink/lib/bash-java-utils.jar
+    environment:
+      - JOB_MANAGER_RPC_ADDRESS=jobmanager
+      - TASK_MANAGER_NUMBER_OF_TASK_SLOTS=5
+      - TM_RESOURCE_ID=tm-20c-5
+    depends_on:
+      - jobmanager
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
 
   # --------------------
   # 4. Monitoring (Prometheus + Grafana)

@@ -8,7 +8,7 @@ import sys
 import os
 import time
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from propose_v3 import FlinkPropose
+from propose_v6 import FlinkPropose
 
 def main():
     print("=== propose 自動遷移系統 ===")
@@ -25,7 +25,8 @@ def main():
             "--location", "/opt/nexmark",
             "--suite-name", "100m",
             "--category", "oa",
-            "--kafka-server", "kafka:9092"
+            "--kafka-server", "kafka:9092",
+            "--submit-only"
         ]
     }
 
@@ -41,7 +42,7 @@ def main():
     # 設定閾值
     BUSY_THRESHOLD = 850      # busyTime 超過 700ms 視為過載
     SKEW_THRESHOLD = 200      # 傾斜度超過 200 觸發遷移
-    CHECK_INTERVAL = 20       # 每 20 秒檢查一次
+    CHECK_INTERVAL = 30       # 每 30 秒檢查一次
 
     print(f"📊 監控參數:")
     print(f"   - 檢查間隔: {CHECK_INTERVAL} 秒")
@@ -49,7 +50,7 @@ def main():
     print(f"   - Savepoint 目錄: {propose.savepoint_dir}")
     print("\n開始監控...\n")
 
-    time.sleep(10)
+    time.sleep(60)
 
     try:
         while True:

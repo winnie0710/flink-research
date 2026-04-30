@@ -8,7 +8,7 @@ import sys
 import os
 import time
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from detector import FlinkDetector
+from baseline import FlinkDetector
 
 def main():
     print("=== CAOM 自動遷移系統 ===")
@@ -25,7 +25,8 @@ def main():
             "--location", "/opt/nexmark",
             "--suite-name", "100m",
             "--category", "oa",
-            "--kafka-server", "kafka:9092"
+            "--kafka-server", "kafka:9092",
+            "--submit-only"
         ]
     }
 

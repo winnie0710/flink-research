@@ -34,7 +34,8 @@ class FlinkDetector:
                 "--location", "/opt/nexmark",
                 "--suite-name", "100m",
                 "--category", "oa",
-                "--kafka-server", "kafka:9092"
+                "--kafka-server", "kafka:9092",
+                "--submit-only"
             ]
         }
 
@@ -120,27 +121,7 @@ class FlinkDetector:
                     "is_bottleneck": False
                 }
 
-        # Step A: Recover actual source rate
-        # Identify source operators (those with "Source" in name)
-        source_tasks = {k: v for k, v in task_info.items() if "Source" in v["task_name"]}
-
-        for subtask_id, info in source_tasks.items():
-            T_busy = info["T_busy"]
-            T_bp = info["T_bp"]
-            observed_rate = info["observed_rate"]
-
-            if T_busy > 0:
-                # λ̂_Source = λ_Source × (1 + T_bp / T_busy)
-                actual_source_rate = observed_rate * (1 + T_bp / T_busy)
-                info["actual_input_rate"] = actual_source_rate
-            else:
-                info["actual_input_rate"] = observed_rate
-
-        # Step B: Recover actual input rate for all operators using BFS
-        # Build adjacency list based on typical Flink pipeline order
-        target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
-
-        # Group tasks by operator type
+        # Group tasks by operator type (needed before Step A)
         operator_groups = {}
         for subtask_id, info in task_info.items():
             task_name = info["task_name"]
@@ -149,18 +130,40 @@ class FlinkDetector:
             operator_groups[task_name].append(subtask_id)
 
         # Order operators by pipeline position
+        target_order = ["Source", "Window_Max", "Window_Join", "Sink"]
         ordered_operators = []
         for keyword in target_order:
             for op_name in operator_groups.keys():
                 if keyword in op_name and op_name not in ordered_operators:
                     ordered_operators.append(op_name)
-
-        # Add any remaining operators
         for op_name in operator_groups.keys():
             if op_name not in ordered_operators:
                 ordered_operators.append(op_name)
 
-        # Propagate actual input rates downstream
+        # Step A: Recover actual input rate for each Source subtask,
+        # then sum to operator-level total_actual for the source operator.
+        for op_name in ordered_operators:
+            if "Source" not in op_name:
+                continue
+            for subtask_id in operator_groups[op_name]:
+                info = task_info[subtask_id]
+                T_busy = info["T_busy"]
+                T_bp = info["T_bp"]
+                observed_rate = info["observed_rate"]
+                if T_busy > 0:
+                    # λ̂_j = λ_j × (1 + T_bp / T_busy)
+                    info["actual_input_rate"] = observed_rate * (1 + T_bp / T_busy)
+                else:
+                    info["actual_input_rate"] = observed_rate
+
+        # Step B: Operator-level BFS propagation downstream.
+        # For each downstream operator:
+        #   1. total_actual[upstream] = Σ actual_input_rate of upstream subtasks
+        #   2. total_observed[current] = Σ observed_rate of current subtasks
+        #   3. total_observed[upstream] = Σ observed_rate of upstream subtasks
+        #   4. total_actual[current] = total_actual[upstream]
+        #                              × (total_observed[current] / total_observed[upstream])
+        #   5. Distribute proportionally to each subtask by its observed_rate share.
         for i in range(1, len(ordered_operators)):
             upstream_op = ordered_operators[i - 1]
             current_op = ordered_operators[i]
@@ -168,15 +171,23 @@ class FlinkDetector:
             upstream_subtasks = operator_groups[upstream_op]
             current_subtasks = operator_groups[current_op]
 
-            # Calculate average rates for upstream
-            upstream_avg_actual = sum(task_info[st]["actual_input_rate"] for st in upstream_subtasks) / len(upstream_subtasks) if upstream_subtasks else 0
-            upstream_avg_observed = sum(task_info[st]["observed_rate"] for st in upstream_subtasks) / len(upstream_subtasks) if upstream_subtasks else 1
+            upstream_total_actual = sum(task_info[st]["actual_input_rate"] for st in upstream_subtasks)
+            upstream_total_observed = sum(task_info[st]["observed_rate"] for st in upstream_subtasks)
+            current_total_observed = sum(task_info[st]["observed_rate"] for st in current_subtasks)
 
-            if upstream_avg_observed > 0:
-                for subtask_id in current_subtasks:
-                    observed_rate = task_info[subtask_id]["observed_rate"]
-                    # λ̂_i = λ̂_upstream × (observed_rate_i / observed_rate_upstream)
-                    task_info[subtask_id]["actual_input_rate"] = upstream_avg_actual * (observed_rate / upstream_avg_observed) if upstream_avg_observed > 0 else observed_rate
+            if upstream_total_observed > 0:
+                # Operator-level actual input rate for current op
+                current_total_actual = upstream_total_actual * (current_total_observed / upstream_total_observed)
+            else:
+                current_total_actual = current_total_observed
+
+            # Distribute back to each subtask proportionally
+            for subtask_id in current_subtasks:
+                obs = task_info[subtask_id]["observed_rate"]
+                if current_total_observed > 0:
+                    task_info[subtask_id]["actual_input_rate"] = current_total_actual * (obs / current_total_observed)
+                else:
+                    task_info[subtask_id]["actual_input_rate"] = obs
 
         # Step C: Calculate max capacity for each subtask
         for subtask_id, info in task_info.items():
@@ -208,6 +219,7 @@ class FlinkDetector:
             # Operator-level bottleneck check: total_actual_input_rate > total_max_capacity
             if total_actual_input_rate > total_max_capacity and total_max_capacity > 0:
                 bottleneck_operators.add(op_name)
+                print(f"Operator '{op_name}' is a bottleneck with total_actual_input_rate={total_actual_input_rate} and total_max_capacity={total_max_capacity}")
 
                 # Mark ALL subtasks of this operator as bottleneck
                 for subtask_id in subtasks:
@@ -271,9 +283,10 @@ class FlinkDetector:
             # Note: Prometheus metrics use underscore format (tm_20c_1) not hyphen (tm-20c-1)
             cpu_capacity_map = {
                 "tm_20c_1": 2.0,
-                "tm_20c_2_net": 2.0,
-                "tm_10c_3_cpu": 1.0,
-                "tm_20c_4": 2.0
+                "tm_20c_2": 2.0,
+                "tm_20c_3": 2.0,
+                "tm_20c_4": 1.0,
+                "tm_20c_5": 1.0
             }
 
             # Step 1: Query Prometheus for load information from busy TMs
@@ -381,25 +394,56 @@ class FlinkDetector:
             print(f"⚠️ 獲取 Subtask 位置失敗: {e}")
             return {}
 
+    def get_taskmanager_network_usage(self):
+        """
+        查詢每個 TaskManager 的當前網路吞吐量（bytes/s），
+        以各 TM 上所有 subtask 的 numBytesOutPerSecond 加總為代理指標。
+        返回: { resource_id: bytes_per_second }
+        """
+        try:
+            query = 'sum(flink_taskmanager_job_task_numBytesOutPerSecond) by (resource_id)'
+            response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query})
+            data = response.json()
+
+            network_usage = {}
+            if data['status'] == 'success':
+                for r in data['data']['result']:
+                    resource_id = r['metric'].get('resource_id') or r['metric'].get('tm_id', 'unknown')
+                    network_usage[resource_id] = float(r['value'][1])
+
+            return network_usage
+
+        except Exception as e:
+            print(f"⚠️ 獲取網路使用量失敗: {e}")
+            return {}
+
     def generate_migration_plan(self, overloaded_subtasks=None):
         """
-        Generate capacity-aware migration plan respecting hardware limits
-        - Slot Constraint: Max 6 subtasks per TM
-        - Heavy-First Sorting: Process bottlenecks by actual_input_rate (descending)
-        - Normalized Load: (Current BusyTime + New Load) / CPU Limit
+        Baseline Migration Planner: CAOM + Neptune + WASP/Amnis
+
+        Step 1 (CAOM):   Entire bottleneck operator's subtasks enter migration set Ω
+                         (CAOM flaw: healthy subtasks included, causing unnecessary downtime)
+        Step 2 (Neptune): Sort Ω by interference score = (cpu_norm + net_norm)^n, descending
+                          (Neptune flaw: blends CPU and network into one opaque score)
+        Step 3 (WASP+Amnis):
+          - WASP hard filter: available_slots >= 1  AND
+                              (current_network + subtask_network) <= alpha * network_capacity
+          - Amnis objective:  argmin(C_v / O_v) among candidates
+                              (C_v = node_current_load + subtask_load, O_v = cpu_limit * 1000)
+
         Returns: { "subtask_id": "target_resource_id", ... }
         """
-        # Use bottlenecks from CAOM detection if no explicit list provided
+        # ── Build migration set Ω from CAOM detection results ──────────────────
         if overloaded_subtasks is None:
             if not hasattr(self, '_bottleneck_subtasks') or not self._bottleneck_subtasks:
                 print("⚠️ 未檢測到瓶頸，無需產生遷移計畫")
                 return None
-            # Extract subtask IDs from CAOM detection results
             overloaded_subtasks = [(subtask_id, actual_rate)
                                    for subtask_id, actual_rate, max_cap in self._bottleneck_subtasks]
 
         tm_info = self.get_taskmanager_info()
         current_locations = self.get_subtask_locations()
+        network_usage = self.get_taskmanager_network_usage()
 
         if not tm_info:
             print("⚠️ 無法獲取 TaskManager 資訊，無法產生遷移計畫")
@@ -409,10 +453,22 @@ class FlinkDetector:
             print("⚠️ 未檢測到過載的 subtask，無需產生遷移計畫")
             return None
 
-        # Constants
-        MAX_SLOTS_PER_TM = 6
+        # ── Constants ──────────────────────────────────────────────────────────
+        MAX_SLOTS_PER_TM = 5
+        NEPTUNE_N = 3          # Neptune interference score amplifier exponent
+        WASP_ALPHA = 0.9       # WASP bandwidth threshold ratio
 
-        # Initialize slot occupancy tracker from current locations
+        # Network capacity map: outbound bandwidth ceiling (bytes/s)
+        # tm_20c_2_net and tm_20c_4 are network-constrained in docker-compose.yml
+        network_capacity_map = {
+            "tm_20c_1":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
+            "tm_20c_2":     int(18.75 * 1024 * 1024),  # 150 Mbit/s = 18.75 MB/s   ← network-constrained TM
+            "tm_20c_3":     int(18.75 * 1024 * 1024),   # 150 Mbit/s = 18.75 MB/s  ← network-constrained TM
+            "tm_20c_4":     int(37.5 * 1024 * 1024),  # 300 Mbit/s = 37.5 MB/s
+            "tm_20c_5":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
+        }
+
+        # ── Initialize slot occupancy ──────────────────────────────────────────
         slot_occupancy = {rid: 0 for rid in tm_info.keys()}
         for subtask_id, resource_id in current_locations.items():
             if resource_id in slot_occupancy:
@@ -421,104 +477,170 @@ class FlinkDetector:
         print(f"\n📊 初始 Slot 佔用情況:")
         for rid, count in slot_occupancy.items():
             cpu_limit = tm_info[rid]['cpu_limit']
-            print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, CPU limit: {cpu_limit}")
+            net_used = network_usage.get(rid, 0) / (1024 * 1024)
+            net_cap = network_capacity_map.get(rid, int(37.5 * 1024 * 1024)) / (1024 * 1024)
+            print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, CPU: {cpu_limit}, "
+                  f"Net: {net_used:.1f}/{net_cap:.0f} MB/s")
 
-        # Sort bottleneck subtasks by actual_input_rate (descending - heavy first)
-        bottleneck_list = []
+        # ── Step 2: Neptune — compute interference scores and sort Ω ──────────
+        # CPU demand proxy  : T_busy (ms/s, range 0–1000)
+        # Network demand proxy: observed_rate (records/s) — traffic volume proxy
+        migration_candidates = []
         for subtask_id, actual_rate in overloaded_subtasks:
             if hasattr(self, '_task_info') and subtask_id in self._task_info:
-                task_detail = self._task_info[subtask_id]
-                bottleneck_list.append((subtask_id, task_detail['actual_input_rate'], task_detail['T_busy']))
+                info = self._task_info[subtask_id]
+                cpu_demand = info['T_busy'] * 1000       # convert back to ms/s
+                net_demand = info['observed_rate']       # records/s as bandwidth proxy
             else:
-                bottleneck_list.append((subtask_id, actual_rate, 0))
+                cpu_demand = actual_rate
+                net_demand = actual_rate
+            migration_candidates.append({
+                'subtask_id': subtask_id,
+                'actual_rate': actual_rate,
+                'cpu_demand': cpu_demand,
+                'net_demand': net_demand,
+            })
 
-        # Sort by actual_input_rate descending (heavy first)
-        bottleneck_list.sort(key=lambda x: x[1], reverse=True)
-        bottleneck_subtask_ids = {subtask_id for subtask_id, _, _ in bottleneck_list}
+        # Normalize CPU and network demands to [0, 1] range
+        max_cpu = max((c['cpu_demand'] for c in migration_candidates), default=1.0) or 1.0
+        max_net = max((c['net_demand'] for c in migration_candidates), default=1.0) or 1.0
 
-        print(f"\n🔍 檢測到 {len(bottleneck_subtask_ids)} 個瓶頸 Subtask (Heavy-First Order)")
+        for c in migration_candidates:
+            cpu_norm = c['cpu_demand'] / max_cpu
+            net_norm = c['net_demand'] / max_net
+            # Neptune interference score: blended normalized demand, amplified by exponent n
+            # Flaw: CPU bottleneck vs network bottleneck are indistinguishable after blending
+            c['interference_score'] = pow(cpu_norm + net_norm, NEPTUNE_N)
 
-        # Initialize migration plan with all subtasks staying in place
+        # Sort descending by interference score (highest-interference subtasks migrated first)
+        migration_candidates.sort(key=lambda x: x['interference_score'], reverse=True)
+        bottleneck_subtask_ids = {c['subtask_id'] for c in migration_candidates}
+
+        print(f"\n🔍 [Neptune] {len(migration_candidates)} 個 Subtask 已按干擾分數排序 (n={NEPTUNE_N})")
+        for c in migration_candidates:
+            print(f"   {c['subtask_id']}: score={c['interference_score']:.4f} "
+                  f"(cpu_demand={c['cpu_demand']:.1f}, net_demand={c['net_demand']:.2f})")
+
+        # ── Initialize migration plan: everyone stays put initially ───────────
         migration_plan = {}
         for subtask_id, current_resource_id in current_locations.items():
             migration_plan[subtask_id] = current_resource_id
 
-        # Track normalized load for each TM (for migration decisions)
+        # Track mutable state: load and network usage per TM
         tm_load_tracker = {rid: info['current_load'] for rid, info in tm_info.items()}
+        tm_net_tracker = {rid: network_usage.get(rid, 0.0) for rid in tm_info.keys()}
 
-        # Process bottleneck subtasks (heavy first)
-        for subtask_id, actual_rate, busy_time in bottleneck_list:
+        # Estimate per-subtask network demand in bytes using average across candidates
+        # so WASP constraint uses the same unit as network_capacity_map
+        total_net_demand_records = sum(c['net_demand'] for c in migration_candidates) or 1.0
+        total_net_usage_bytes = sum(tm_net_tracker.values()) or 1.0
+        # Conversion factor: scale records/s demand to bytes proportionally to observed usage
+        records_to_bytes_scale = total_net_usage_bytes / total_net_demand_records
+
+        # ── Pre-deduct: 資源預扣除 vacate source TM slots for all bottleneck subtasks ────
+        # This reflects that the entire bottleneck operator is stopped before any
+        # subtask is reassigned, so the source nodes' slots are freed upfront.
+        for candidate in migration_candidates:
+            src = current_locations.get(candidate['subtask_id'], 'unknown')
+            if src in slot_occupancy:
+                slot_occupancy[src] -= 1
+                tm_load_tracker[src] -= candidate['cpu_demand']
+                tm_net_tracker[src] -= candidate['net_demand'] * records_to_bytes_scale
+
+        # ── Step 3: WASP filter + Amnis argmin(C_v / O_v) selection ──────────
+        for candidate in migration_candidates:
+            subtask_id = candidate['subtask_id']
             current_resource_id = current_locations.get(subtask_id, 'unknown')
 
             if current_resource_id not in tm_info:
                 print(f"⚠️ {subtask_id} 的 resource_id {current_resource_id} 不在 TM 列表中，跳過")
                 continue
 
-            # Calculate potential load contribution (use busy_time as proxy)
-            potential_new_load = busy_time if busy_time > 0 else 100
+            subtask_cpu_load = candidate['cpu_demand']   # ms/s, added to tm_load_tracker
+            subtask_net_bytes = candidate['net_demand'] * records_to_bytes_scale
 
-            # Find best target TM
-            target_resource_id = None
-            best_normalized_load = float('inf')
+            best_node = None
+            best_congestion_ratio = float('inf')
 
             for rid, info in tm_info.items():
-                # Skip current TM (must migrate)
-                if rid == current_resource_id:
-                    continue
-
-                # Check slot availability
+                # ── WASP hard constraint 1: available computing slots ──────
                 if slot_occupancy[rid] >= MAX_SLOTS_PER_TM:
                     continue
 
-                # Calculate normalized load: (current_load + potential_new_load) / cpu_limit
-                current_load = tm_load_tracker[rid]
-                cpu_limit = info['cpu_limit']
-                normalized_load = (current_load + potential_new_load) / cpu_limit
+                # ── WASP hard constraint 2: bandwidth threshold ────────────
+                net_cap = network_capacity_map.get(rid, 250 * 1024 * 1024)
+                if (tm_net_tracker[rid] + subtask_net_bytes) > WASP_ALPHA * net_cap:
+                    continue
 
-                if normalized_load < best_normalized_load:
-                    best_normalized_load = normalized_load
-                    target_resource_id = rid
+                # ── Amnis objective: argmin(C_v / O_v) ───────────────────
+                # C_v: total resource requirement after placing this subtask
+                # O_v: resource capacity of the node (cpu_limit * 1000 ms/s)
+                C_v = tm_load_tracker[rid] + subtask_cpu_load
+                O_v = info['cpu_limit'] * 1000.0
+                congestion_ratio = C_v / O_v if O_v > 0 else float('inf')
+                print(f"   {subtask_id} -> {rid}: C_v={C_v:.3f}, O_v={O_v:.3f}, congestion_ratio={congestion_ratio:.3f} ")
 
-            if target_resource_id:
-                # Update migration plan
-                migration_plan[subtask_id] = target_resource_id
+                if congestion_ratio < best_congestion_ratio:
+                    best_congestion_ratio = congestion_ratio
+                    best_node = rid
 
-                # Update slot occupancy (remove from old, add to new)
-                if current_resource_id in slot_occupancy:
-                    slot_occupancy[current_resource_id] -= 1
-                slot_occupancy[target_resource_id] += 1
+            if best_node:
+                migration_plan[subtask_id] = best_node
 
-                # Update load tracker
-                tm_load_tracker[target_resource_id] += potential_new_load
+                # Update trackers so later subtasks in the sorted list see accurate state
+                slot_occupancy[best_node] += 1
+                tm_load_tracker[best_node] += subtask_cpu_load
+                tm_net_tracker[best_node] += subtask_net_bytes
 
-                # Get detailed info from CAOM detection
                 if hasattr(self, '_task_info') and subtask_id in self._task_info:
-                    task_detail = self._task_info[subtask_id]
-                    max_capacity = task_detail['max_capacity']
-                    overload_pct = ((actual_rate - max_capacity) / max_capacity * 100) if max_capacity > 0 else 0
-
-                    print(f"📋 計畫遷移: {subtask_id}")
-                    print(f"   從: {current_resource_id} (CPU: {tm_info[current_resource_id]['cpu_limit']}) -> 到: {target_resource_id} (CPU: {tm_info[target_resource_id]['cpu_limit']})")
-                    print(f"   目標 host: {tm_info[target_resource_id]['host']}, Normalized Load: {best_normalized_load:.2f}")
-                    print(f"   Slots: {slot_occupancy[target_resource_id]}/{MAX_SLOTS_PER_TM}")
-                    print(f"   實際輸入: {actual_rate:.2f} rec/s, 最大容量: {max_capacity:.2f} rec/s")
-                    print(f"   過載程度: {overload_pct:.1f}%")
+                    info = self._task_info[subtask_id]
+                    max_cap = info['max_capacity']
+                    overload_pct = ((candidate['actual_rate'] - max_cap) / max_cap * 100) if max_cap > 0 else 0
+                    print(f"📋 [WASP+Amnis] 遷移: {subtask_id}")
+                    print(f"   從: {current_resource_id} -> 到: {best_node} "
+                          f"(CPU: {tm_info[best_node]['cpu_limit']})")
+                    print(f"   C_v/O_v={best_congestion_ratio:.3f}, "
+                          f"Slots: {slot_occupancy[best_node]}/{MAX_SLOTS_PER_TM}")
+                    print(f"   過載程度: {overload_pct:.1f}%, "
+                          f"干擾分數: {candidate['interference_score']:.4f}")
                 else:
-                    print(f"📋 計畫遷移: {subtask_id}")
-                    print(f"   從: {current_resource_id} -> 到: {target_resource_id}")
-                    print(f"   Normalized Load: {best_normalized_load:.2f}, Slots: {slot_occupancy[target_resource_id]}/{MAX_SLOTS_PER_TM}")
+                    print(f"📋 [WASP+Amnis] 遷移: {subtask_id} -> {best_node} "
+                          f"(C_v/O_v={best_congestion_ratio:.3f})")
             else:
-                # No suitable target found, keep in place
-                print(f"⚠️ 無可用 TM 遷移: {subtask_id} (所有 TM 已達 slot 上限或負載過高), 維持原位")
+                # WASP/Amnis 無法找到符合硬性限制的節點（排擠效應）
+                # 退路策略：嘗試原位；若原位 slot 也不足，則隨機放到任一有空位的 TM
+                if slot_occupancy.get(current_resource_id, 0) < MAX_SLOTS_PER_TM:
+                    fallback_node = current_resource_id
+                    fallback_reason = "原位 slot 充足，維持原位"
+                else:
+                    fallback_node = next(
+                        (rid for rid, cnt in slot_occupancy.items() if cnt < MAX_SLOTS_PER_TM),
+                        None
+                    )
+                    fallback_reason = f"原位 slot 已滿，隨機放到 {fallback_node}" if fallback_node else "所有 TM slot 已滿，無法安置"
+
+                if fallback_node:
+                    migration_plan[subtask_id] = fallback_node
+                    slot_occupancy[fallback_node] += 1
+                    tm_load_tracker[fallback_node] += subtask_cpu_load
+                    tm_net_tracker[fallback_node] += subtask_net_bytes
+                    print(f"⚠️ [WASP+Amnis] 無符合條件節點: {subtask_id} → {fallback_reason}")
+                else:
+                    print(f"❌ [WASP+Amnis] 無法安置: {subtask_id}，所有 TM slot 已滿")
 
         print(f"\n📊 最終 Slot 佔用情況:")
         for rid, count in slot_occupancy.items():
             cpu_limit = tm_info[rid]['cpu_limit']
-            normalized_load = tm_load_tracker[rid] / cpu_limit if cpu_limit > 0 else 0
-            print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, CPU: {cpu_limit}, Normalized Load: {normalized_load:.2f}")
+            C_v = tm_load_tracker[rid]
+            O_v = cpu_limit * 1000.0
+            print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, "
+                  f"C_v/O_v={C_v/O_v:.3f} (cpu_limit={cpu_limit})")
 
         print(f"\n✅ 遷移計畫包含 {len(migration_plan)} 個 subtask")
-        migrated_count = sum(1 for sid in bottleneck_subtask_ids if migration_plan[sid] != current_locations.get(sid))
+        migrated_count = sum(
+            1 for sid in bottleneck_subtask_ids
+            if migration_plan.get(sid) != current_locations.get(sid)
+        )
         print(f"   需要遷移: {migrated_count} 個")
         print(f"   維持原位: {len(migration_plan) - migrated_count} 個")
 

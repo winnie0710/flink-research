@@ -81,6 +81,8 @@ public class BenchmarkIsoQ7 {
     private static final Option LOCATION = new Option("l", "location", true, "Nexmark directory.");
     private static final Option QUERIES = new Option("q", "queries", true, "Query to run.");
     private static final Option CATEGORY = new Option("c", "category", true, "Query category.");
+    // 當由 CAOM 系統管理 job 生命週期時使用，僅提交 job 並確認 RUNNING 後退出，不監控也不取消
+    private static final Option SUBMIT_ONLY = new Option("so", "submit-only", false, "Submit job and exit without monitoring or cancelling (for CAOM managed mode).");
 
     public static final String CATEGORY_OA = "oa";
 
@@ -94,16 +96,20 @@ public class BenchmarkIsoQ7 {
         Path location = new File(line.getOptionValue(LOCATION.getOpt())).toPath();
         String category = CATEGORY.getValue(CATEGORY_OA).toLowerCase();
         boolean isQueryOa = CATEGORY_OA.equals(category);
+        boolean submitOnly = line.hasOption(SUBMIT_ONLY.getOpt());
         Path queryLocation = isQueryOa ? location.resolve("queries") : location.resolve("queries-" + category);
 
         // 獲取查詢列表
         List<String> queries = getQueries(queryLocation, line.getOptionValue(QUERIES.getOpt()), isQueryOa);
 
         System.out.println("Benchmark Queries: " + queries);
-        runQueries(queries, location, category);
+        if (submitOnly) {
+            System.out.println(">>> Submit-only mode: job will be managed externally by CAOM.");
+        }
+        runQueries(queries, location, category, submitOnly);
     }
 
-    private static void runQueries(List<String> queries, Path location, String category) {
+    private static void runQueries(List<String> queries, Path location, String category, boolean submitOnly) {
         String flinkHome = System.getenv("FLINK_HOME");
         if (flinkHome == null) {
             throw new IllegalArgumentException("FLINK_HOME environment variable is not set.");
@@ -147,10 +153,13 @@ public class BenchmarkIsoQ7 {
                 flinkDist,
                 totalMetrics,
                 category,
-                nexmarkConf // 傳入配置以便 Q7 使用
+                nexmarkConf,
+                submitOnly
         );
 
-        printSummary(totalMetrics);
+        if (!submitOnly) {
+            printSummary(totalMetrics);
+        }
 
         flinkRestClient.close();
         cpuMetricReceiver.close();
@@ -197,7 +206,8 @@ public class BenchmarkIsoQ7 {
             Path flinkDist,
             LinkedHashMap<String, JobBenchmarkMetric> totalMetrics,
             String category,
-            Configuration nexmarkConf) {
+            Configuration nexmarkConf,
+            boolean submitOnly) {
 
         for (String queryName : queries) {
             // 對於 q7-isolated，我們使用 q7 的 workload 配置 (或者您可以自定義)
@@ -225,7 +235,7 @@ public class BenchmarkIsoQ7 {
             // [修改點] 判斷是否為我們的特殊查詢
             if (queryName.equals(Q7_ISOLATED_NAME)) {
                 System.out.println(">>> Starting Custom Logic for: " + Q7_ISOLATED_NAME);
-                metric = runIsolatedQ7(nexmarkConf, reporter, workload);
+                metric = runIsolatedQ7(nexmarkConf, reporter, workload, submitOnly);
             } else {
                 // 原有的 SQL 執行路徑
                 QueryRunner runner = new QueryRunner(
@@ -247,7 +257,7 @@ public class BenchmarkIsoQ7 {
      * [Modified] 執行硬編碼的 Q7 Isolated DataStream 邏輯
      * 整合 QueryRunner 的生命週期管理與 MetricReporter 監控
      */
-    private static JobBenchmarkMetric runIsolatedQ7(Configuration conf, MetricReporter reporter, Workload workload) {
+    private static JobBenchmarkMetric runIsolatedQ7(Configuration conf, MetricReporter reporter, Workload workload, boolean submitOnly) {
         JobClient jobClient = null;
         try {
             // -------------------------------------------------------------------------
@@ -310,7 +320,7 @@ public class BenchmarkIsoQ7 {
             // 每 2 秒鐘，結算過去 10 秒鐘的帳
             DataStream<Bid> maxBids = bids
                     .keyBy(bid -> bid.auction)
-                    .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(2)))
+                    .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(4)))
                     .max("price")
                     .name("Window-Max")
                     .uid("window-max-uid")
@@ -320,7 +330,7 @@ public class BenchmarkIsoQ7 {
                     .join(maxBids)
                     .where(bid -> bid.auction)
                     .equalTo(bid -> bid.auction)
-                    .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(2)))
+                    .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(4)))
                     .apply(new JoinFunction<Bid, Bid, String>() {
                         @Override
                         public String join(Bid original, Bid max) {
@@ -334,7 +344,7 @@ public class BenchmarkIsoQ7 {
             // -------------------------------------------------------------------------
             // 4. Sink 設定
             // -------------------------------------------------------------------------
-            Properties sinkProperties = new Properties();   // 設定批次發送電腦好像無法負荷
+            Properties sinkProperties = new Properties();
             //[關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
             // 這會犧牲一點點延遲(Latency)，換取巨大的吞吐量(Throughput)提升
             sinkProperties.setProperty("linger.ms", "10");
@@ -398,9 +408,16 @@ public class BenchmarkIsoQ7 {
             }
 
             // -------------------------------------------------------------------------
-            // 7. 啟動監控 (參考 QueryRunner 邏輯)
+            // 7. Submit-only mode: 由 CAOM 管理 job 生命週期，driver 直接退出
             // -------------------------------------------------------------------------
+            if (submitOnly) {
+                System.out.println(">>> Submit-only mode: job " + jobID + " is RUNNING. Driver exits. CAOM will manage this job.");
+                return new JobBenchmarkMetric(0.0, 0.0, 0L, 0L);
+            }
 
+            // -------------------------------------------------------------------------
+            // 8. 啟動監控 (參考 QueryRunner 邏輯)
+            // -------------------------------------------------------------------------
             // 這裡不需要像 QueryRunner 一樣做 Warmup，直接進入監控
             // 使用 MetricReporter 的標準介面，這會阻塞直到 monitorDuration 結束
             JobBenchmarkMetric metric = reporter.reportMetric(jobID.toHexString(), workload.getEventsNum());
@@ -411,12 +428,12 @@ public class BenchmarkIsoQ7 {
             throw new RuntimeException("Failed to run isolated Q7", e);
         } finally {
             // -------------------------------------------------------------------------
-            // 8. 停止 Job (參考 QueryRunner 的 cancelJob)
+            // 9. 停止 Job — 僅在非 submit-only 模式下取消
+            // submit-only 模式由 CAOM Python 系統負責管理 job 生命週期
             // -------------------------------------------------------------------------
-            if (jobClient != null) {
+            if (!submitOnly && jobClient != null) {
                 System.out.println("Stopping job " + jobClient.getJobID());
                 try {
-                    // 嘗試取消 Job
                     jobClient.cancel().get();
                 } catch (Exception e) {
                     System.err.println("Warning: Failed to cancel job " + jobClient.getJobID());
@@ -536,6 +553,7 @@ public class BenchmarkIsoQ7 {
         options.addOption(QUERIES);
         options.addOption(CATEGORY);
         options.addOption(LOCATION);
+        options.addOption(SUBMIT_ONLY);
         return options;
     }
 }

@@ -10,8 +10,8 @@ PROM_URL = "http://localhost:9090"
 #JOB_NAME = "Nexmark_Q7_Isolated__Benchmark_Driver_"
 JOB_NAME = "Nexmark_Q4_Isolated__Benchmark_Driver_"
 # TODO: 每次實驗結果放入不同資料夾
-OUTPUT_FILE = "/home/yenwei/research/structure_setup/output/t16_1"
-OUTPUT_CSV = "/home/yenwei/research/structure_setup/output/t16_1/latency_data.csv"
+OUTPUT_FILE = "/home/yenwei/research/structure_setup/output/t17"
+OUTPUT_CSV = "/home/yenwei/research/structure_setup/output/t17/latency_data.csv"
 SAMPLE_INTERVAL = 2
 
 QUERY_TOTAL_LATENCY = f"""

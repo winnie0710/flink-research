@@ -1,0 +1,18 @@
+{
+  "Source:_Source:_KafkaSource____Filter____Filter_Map_Bids_1": "tm_20c_2",
+  "Source:_Source:_KafkaSource____Filter____Filter_Map_Bids_0": "tm_20c_2",
+  "HOP_Expand_5x____Timestamps_Watermarks_2": "tm_20c_2",
+  "HOP_Expand_5x____Timestamps_Watermarks_0": "tm_20c_4",
+  "Window_Max_Filter____Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_0": "tm_20c_4",
+  "Window_Auction_Count_2": "tm_20c_2",
+  "Source:_Source:_KafkaSource____Filter____Filter_Map_Bids_2": "tm_20c_1",
+  "HOP_Expand_5x____Timestamps_Watermarks_1": "tm_20c_1",
+  "Window_Auction_Count_1": "tm_20c_5",
+  "Window_Max_Filter____Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_2": "tm_20c_5",
+  "Window_Auction_Count_0": "tm_20c_1",
+  "Window_Auction_Count_3": "tm_20c_3",
+  "Window_Max_Filter____Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_3": "tm_20c_5",
+  "Source:_Source:_KafkaSource____Filter____Filter_Map_Bids_3": "tm_20c_3",
+  "Window_Max_Filter____Sink:_KafkaSink:_Writer____Sink:_KafkaSink:_Committer_1": "tm_20c_3",
+  "HOP_Expand_5x____Timestamps_Watermarks_3": "tm_20c_3"
+}

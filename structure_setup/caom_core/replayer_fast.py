@@ -9,8 +9,8 @@ BOOTSTRAP_SERVERS = 'localhost:9093'
 TOPIC_NAME = 'nexmark-events'
 
 # 速率控制 (正弦波)
-MIN_TPS = 60000
-MAX_TPS = 120000
+MIN_TPS = 80000
+MAX_TPS = 140000
 PERIOD_SECONDS = 30
 OFFSET = (MAX_TPS + MIN_TPS) // 2
 AMPLITUDE = (MAX_TPS - MIN_TPS) // 2
@@ -26,7 +26,7 @@ conf = {
     'client.id': 'python-optimized-producer',
     'linger.ms': 10,
     'batch.size': 131072,
-    'compression.type': 'gzip',
+    'compression.type': 'lz4',
     'queue.buffering.max.messages': 2000000,
     'queue.buffering.max.kbytes': 1048576, # 降為 1GB，因為我們不再吃掉大量 RAM 存資料，可以留多一點給 Buffer
 }

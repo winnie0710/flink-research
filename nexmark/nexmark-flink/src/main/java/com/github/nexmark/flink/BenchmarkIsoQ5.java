@@ -2,9 +2,12 @@ package com.github.nexmark.flink;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.AggregateFunction;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.DeliveryGuarantee;
 import org.apache.flink.connector.kafka.sink.KafkaRecordSerializationSchema;
@@ -14,7 +17,6 @@ import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsIni
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.windowing.ProcessWindowFunction;
-import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows;
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow;
 import org.apache.flink.util.Collector;
@@ -48,15 +50,40 @@ import static com.github.nexmark.flink.metric.BenchmarkMetric.formatLongValue;
 import static com.github.nexmark.flink.metric.BenchmarkMetric.formatLongValuePerSecond;
 
 /**
- * Revised to include Hardcoded Q5 (Hot Items) Isolated Logic.
+ * Q5 Hot Items — DataStream implementation that reproduces SQL HOP's network fan-out.
+ *
+ * SQL HOP(TABLE bid, 2s, 10s) expands each bid into 5 rows before shuffling to GROUP BY.
+ * The naive DataStream approach (SlidingEventTimeWindows.aggregate after keyBy) absorbs
+ * the fan-out into local state, producing no network pressure.
+ *
+ * Fix: add an explicit HopExpandFunction flatMap BEFORE the first keyBy so that the
+ * 5× record multiplication crosses the network wire, matching SQL semantics.
+ *
+ * Each expanded record carries (auction, windowEnd, price, metadata) where metadata
+ * is a concatenation of url|extra|channel|dateTime — this bloats each record to ~120 bytes
+ * so that 175k records/s × 120 bytes ≈ 21 MB/s per HOP subtask, exceeding the 18.75 MB/s
+ * limit on tm_20c_2/3 and producing a measurable network bottleneck without changing TPS.
+ *
+ * Pipeline:
+ *   Source (ingest-group)
+ *     → HOP-Expand 5× carrying full metadata (hop-group)  ← ~21 MB/s fan-out here
+ *     → re-watermark on windowEnd
+ *     → keyBy(auction:windowEnd) + Tumble(2s) aggregate (count, maxPrice) (count-group)
+ *     → keyBy(windowEnd) + Tumble(2s) find max-count auction (max-group+sink)
  */
 public class BenchmarkIsoQ5 {
 
     private static final String Q5_ISOLATED_NAME = "q5-isolated";
 
-    private static final Option LOCATION = new Option("l", "location", true, "Nexmark directory.");
-    private static final Option QUERIES = new Option("q", "queries", true, "Query to run.");
-    private static final Option CATEGORY = new Option("c", "category", true, "Query category.");
+    // HOP window parameters (must match q5.sql)
+    private static final long HOP_SIZE_MS  = 10_000L;
+    private static final long HOP_SLIDE_MS =  2_000L;
+
+    private static final Option LOCATION    = new Option("l", "location",    true,  "Nexmark directory.");
+    private static final Option QUERIES     = new Option("q", "queries",     true,  "Query to run.");
+    private static final Option CATEGORY    = new Option("c", "category",    true,  "Query category.");
+    private static final Option SUBMIT_ONLY = new Option("so", "submit-only", false,
+            "Submit job and exit without monitoring or cancelling (for CAOM managed mode).");
 
     public static final String CATEGORY_OA = "oa";
 
@@ -69,11 +96,12 @@ public class BenchmarkIsoQ5 {
         boolean isQueryOa = CATEGORY_OA.equals(category);
         Path queryLocation = isQueryOa ? location.resolve("queries") : location.resolve("queries-" + category);
 
+        boolean submitOnly = line.hasOption(SUBMIT_ONLY.getOpt());
         List<String> queries = getQueries(queryLocation, line.getOptionValue(QUERIES.getOpt()), isQueryOa);
-        runQueries(queries, location, category);
+        runQueries(queries, location, category, submitOnly);
     }
 
-    private static void runQueries(List<String> queries, Path location, String category) {
+    private static void runQueries(List<String> queries, Path location, String category, boolean submitOnly) {
         Configuration nexmarkConf = NexmarkGlobalConfiguration.loadConfiguration();
         FlinkRestClient flinkRestClient = new FlinkRestClient(
                 nexmarkConf.get(FlinkNexmarkOptions.FLINK_REST_ADDRESS),
@@ -85,10 +113,11 @@ public class BenchmarkIsoQ5 {
 
         WorkloadSuite workloadSuite = WorkloadSuite.fromConf(nexmarkConf, category);
         LinkedHashMap<String, JobBenchmarkMetric> totalMetrics = new LinkedHashMap<>();
+        executeQueries(queries, workloadSuite, flinkRestClient, cpuMetricReceiver, location, totalMetrics, nexmarkConf, submitOnly);
 
-        executeQueries(queries, workloadSuite, flinkRestClient, cpuMetricReceiver, location, totalMetrics, nexmarkConf);
-
-        printSummary(totalMetrics);
+        if (!submitOnly) {
+            printSummary(totalMetrics);
+        }
         flinkRestClient.close();
         cpuMetricReceiver.close();
     }
@@ -96,11 +125,7 @@ public class BenchmarkIsoQ5 {
     private static List<String> getQueries(Path queryLocation, String queries, boolean isQueryOa) {
         List<String> queryList = new ArrayList<>();
         for (String queryName : queries.split(",")) {
-            if (queryName.trim().equals(Q5_ISOLATED_NAME)) {
-                queryList.add(Q5_ISOLATED_NAME);
-            } else {
-                queryList.add(queryName);
-            }
+            queryList.add(queryName.trim().equals(Q5_ISOLATED_NAME) ? Q5_ISOLATED_NAME : queryName);
         }
         return queryList;
     }
@@ -112,7 +137,8 @@ public class BenchmarkIsoQ5 {
             CpuMetricReceiver cpuMetricReceiver,
             Path location,
             LinkedHashMap<String, JobBenchmarkMetric> totalMetrics,
-            Configuration nexmarkConf) {
+            Configuration nexmarkConf,
+            boolean submitOnly) {
 
         for (String queryName : queries) {
             String workloadName = queryName.equals(Q5_ISOLATED_NAME) ? "q5" : queryName;
@@ -128,9 +154,8 @@ public class BenchmarkIsoQ5 {
 
             JobBenchmarkMetric metric;
             if (queryName.equals(Q5_ISOLATED_NAME)) {
-                metric = runIsolatedQ5(nexmarkConf, reporter, workload);
+                metric = runIsolatedQ5(nexmarkConf, reporter, workload, submitOnly);
             } else {
-                // 原有的 SQL 執行路徑
                 metric = new QueryRunner(queryName, workload, location, null, reporter, flinkRestClient, "oa").run();
             }
             totalMetrics.put(queryName, metric);
@@ -138,10 +163,9 @@ public class BenchmarkIsoQ5 {
     }
 
     /**
-     * 執行硬編碼的 Q5 Isolated DataStream 邏輯
-     * Q5: Hot Items (Sliding Window + Max Count)
+     * Hardcoded Q5 pipeline with explicit HOP fan-out over the network.
      */
-    private static JobBenchmarkMetric runIsolatedQ5(Configuration conf, MetricReporter reporter, Workload workload) {
+    private static JobBenchmarkMetric runIsolatedQ5(Configuration conf, MetricReporter reporter, Workload workload, boolean submitOnly) {
         JobClient jobClient = null;
         try {
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -149,8 +173,8 @@ public class BenchmarkIsoQ5 {
             env.enableCheckpointing(120000);
 
             String kafkaBootstrap = conf.getString("kafka.bootstrap.servers", "kafka:9092");
-            Properties properties = new Properties();
-            properties.setProperty("max.poll.records", "50000");
+            Properties kafkaProps = new Properties();
+            kafkaProps.setProperty("max.poll.records", "50000");
 
             KafkaSource<Event> source = KafkaSource.<Event>builder()
                     .setBootstrapServers(kafkaBootstrap)
@@ -158,12 +182,15 @@ public class BenchmarkIsoQ5 {
                     .setGroupId("nexmark-q5-isolated-group")
                     .setStartingOffsets(OffsetsInitializer.latest())
                     .setValueOnlyDeserializer(new NexmarkEventDeserializationSchema())
-                    .setProperties(properties)
+                    .setProperties(kafkaProps)
                     .build();
 
-            // 1. Source & Ingest
+            // ── Stage 1: Source + filter/map ──────────────────────────────────────
+            // SlotSharingGroup "ingest-group" keeps Source on preferred TMs.
             DataStream<Bid> bids = env
-                    .fromSource(source, WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofMillis(200)), "Source: KafkaSource")
+                    .fromSource(source,
+                            WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofMillis(200)),
+                            "Source: KafkaSource")
                     .name("Source: KafkaSource")
                     .uid("source-uid")
                     .slotSharingGroup("ingest-group")
@@ -172,39 +199,59 @@ public class BenchmarkIsoQ5 {
                     .name("Filter-Map-Bids")
                     .slotSharingGroup("ingest-group");
 
-            // 2. 第一層聚合：計算每個 Auction 在視窗內的投標數
-            // Tuple3: (AuctionID, Count, WindowEnd)
-            DataStream<Tuple3<Long, Long, Long>> windowCounts = bids
-                    .keyBy(bid -> bid.auction)
-                    .window(SlidingEventTimeWindows.of(Duration.ofSeconds(10), Duration.ofSeconds(2)))
-                    .aggregate(new CountAggregate())
+            // ── Stage 2: HOP expand with full bid metadata ────────────────────────
+            // Each bid → 5 records, one per overlapping HOP window.
+            // Each record carries (auction, windowEnd, price, metadata) where
+            // metadata = url|extra|channel|dateTime — totalling ~83 chars (~87 B).
+            // Estimated serialized size per record: 8+8+8+87+overhead ≈ 120 B.
+            // At ~175k expanded records/s per subtask: 175k × 120B ≈ 21 MB/s,
+            // exceeding the 18.75 MB/s cap on tm_20c_2/3 → network bottleneck.
+            //
+            // Tuple4<Long, Long, Long, String>:
+            //   f0 = auction id
+            //   f1 = windowEnd (epoch ms)   ← used as event-time after re-watermark
+            //   f2 = bid price
+            //   f3 = metadata string (url|extra|channel|dateTime)
+            DataStream<Tuple4<Long, Long, Long, String>> expandedBids = bids
+                    .flatMap(new HopExpandFunction(HOP_SIZE_MS, HOP_SLIDE_MS))
+                    .returns(Types.TUPLE(Types.LONG, Types.LONG, Types.LONG, Types.STRING))
+                    .name("HOP-Expand-5x")
+                    .uid("hop-expand-uid")
+                    .slotSharingGroup("hop-group")
+                    // timestamp = windowEnd - 1 so TumblingWindow(2s) fires at windowEnd
+                    .assignTimestampsAndWatermarks(
+                            WatermarkStrategy.<Tuple4<Long, Long, Long, String>>forBoundedOutOfOrderness(Duration.ofMillis(0))
+                                    .withTimestampAssigner((t, ts) -> t.f1 - 1L));
+
+            // ── Stage 3: Aggregate (count, maxPrice) per (auction, windowEnd) ────
+            // Tuple4 output: f0=auction, f1=count, f2=maxPrice, f3=windowEnd
+            DataStream<Tuple4<Long, Long, Long, Long>> windowCounts = expandedBids
+                    .keyBy(t -> t.f0 * 100_000_000L + t.f1 / HOP_SLIDE_MS)
+                    .window(TumblingEventTimeWindows.of(Duration.ofMillis(HOP_SLIDE_MS)))
+                    .aggregate(new HopCountAggregate())
                     .name("Window-Auction-Count")
                     .uid("window-count-uid")
                     .slotSharingGroup("count-group");
 
-            // 3. 第二層聚合：找出每個視窗中 Count 最大的 Auction
+            // ── Stage 4: Find hot auction(s) per windowEnd ───────────────────────
+            // keyBy f3 (windowEnd); Window-Max-Filter and Sink share "max-group"
+            // so they chain together on the same thread.
             DataStream<String> hotItems = windowCounts
-                    .keyBy(t -> t.f2) // 按 WindowEnd 分組
-                    .window(TumblingEventTimeWindows.of(Duration.ofSeconds(2)))
+                    .keyBy(t -> t.f3)
+                    .window(TumblingEventTimeWindows.of(Duration.ofMillis(HOP_SLIDE_MS)))
                     .process(new GetMaxProcessFunction())
                     .name("Window-Max-Filter")
                     .uid("window-max-uid")
                     .slotSharingGroup("max-group");
 
-            Properties sinkProperties = new Properties();
-            //[關鍵優化 1] Linger ms: 讓 Producer 等待 5~10ms 以湊滿 Batch
-            // 這會犧牲一點點延遲(Latency)，換取巨大的吞吐量(Throughput)提升
-            sinkProperties.setProperty("linger.ms", "10");
-            // [關鍵優化 2] Batch Size: 加大批次大小 (先設 16KB )
-            sinkProperties.setProperty("batch.size", "131072");
-            // [關鍵優化 3] 壓縮: 減少網路傳輸量 (推薦 lz4 或 snappy，CPU 開銷極低)
-            sinkProperties.setProperty("compression.type", "lz4");
-            // [選用] ACK 設定: 1 代表 Leader 收到就好，all 代表所有副本都要收到 (較慢但安全)
-            // 配合 AT_LEAST_ONCE，Flink 會確保資料不掉，設為 1 通常效能較好
-            sinkProperties.setProperty("acks", "1");
-            sinkProperties.setProperty("buffer.memory", "67108864"); // 64MB 緩衝
+            // ── Stage 5: Sink ─────────────────────────────────────────────────────
+            Properties sinkProps = new Properties();
+            sinkProps.setProperty("linger.ms", "10");
+            sinkProps.setProperty("batch.size", "131072");
+            sinkProps.setProperty("compression.type", "lz4");
+            sinkProps.setProperty("acks", "1");
+            sinkProps.setProperty("buffer.memory", "67108864");
 
-            // 4. Sink
             KafkaSink<String> sink = KafkaSink.<String>builder()
                     .setBootstrapServers(kafkaBootstrap)
                     .setRecordSerializer(KafkaRecordSerializationSchema.builder()
@@ -212,77 +259,194 @@ public class BenchmarkIsoQ5 {
                             .setValueSerializationSchema(new SimpleStringSchema())
                             .build())
                     .setDeliveryGuarantee(DeliveryGuarantee.AT_LEAST_ONCE)
-                    .setKafkaProducerConfig(sinkProperties)
+                    .setKafkaProducerConfig(sinkProps)
                     .build();
 
-            hotItems.sinkTo(sink).name("Sink: KafkaSink").uid("sink-uid").slotSharingGroup("sink-group");
+            hotItems.sinkTo(sink)
+                    .name("Sink: KafkaSink")
+                    .uid("sink-uid")
+                    .slotSharingGroup("max-group");
 
             System.out.println("Submitting Q5 Isolated Job...");
             jobClient = env.executeAsync("Nexmark Q5 Isolated (Migration Test)");
             JobID jobID = jobClient.getJobID();
+            System.out.println("Job submitted with ID: " + jobID);
 
-            // 等待運行 (簡略原有的等待邏輯)
+            // Wait for RUNNING state before proceeding
+            System.out.println("Waiting for job to start running...");
+            int maxWaitSeconds = 30;
+            int waitedSeconds = 0;
+            while (waitedSeconds < maxWaitSeconds) {
+                try {
+                    org.apache.flink.api.common.JobStatus status = jobClient.getJobStatus().get();
+                    if (status == org.apache.flink.api.common.JobStatus.RUNNING) {
+                        System.out.println("Job is now RUNNING");
+                        break;
+                    }
+                    System.out.println("Job status: " + status + ", waiting...");
+                    Thread.sleep(1000);
+                    waitedSeconds++;
+                } catch (Exception e) {
+                    System.err.println("Error checking job status: " + e.getMessage());
+                    Thread.sleep(1000);
+                    waitedSeconds++;
+                }
+            }
+
+            // Submit-only mode: CAOM manages lifecycle, driver exits without monitoring or canceling
+            if (submitOnly) {
+                System.out.println(">>> Submit-only mode: job " + jobID
+                        + " is RUNNING. Driver exits. CAOM will manage this job.");
+                jobClient = null; // prevent finally from canceling
+                return new JobBenchmarkMetric(0.0, 0.0, 0L, 0L);
+            }
+
             Thread.sleep(5000);
-
             return reporter.reportMetric(jobID.toHexString(), workload.getEventsNum());
 
         } catch (Exception e) {
             throw new RuntimeException("Failed to run isolated Q5", e);
         } finally {
+            // Cancel only in non-submit-only mode; CAOM handles submit-only lifecycle.
             if (jobClient != null) {
-                try { jobClient.cancel().get(); } catch (Exception e) { /* ignore */ }
-            }
-        }
-    }
-
-    // --- Helper Classes for Q5 Logic ---
-
-    /**
-     * 累加器：計算 Auction 出現次數，並記錄視窗結束時間
-     */
-    public static class CountAggregate implements AggregateFunction<Bid, Tuple3<Long, Long, Long>, Tuple3<Long, Long, Long>> {
-        @Override public Tuple3<Long, Long, Long> createAccumulator() { return new Tuple3<>(0L, 0L, 0L); }
-        @Override public Tuple3<Long, Long, Long> add(Bid value, Tuple3<Long, Long, Long> acc) {
-            return new Tuple3<>(value.auction, acc.f1 + 1, 0L);
-        }
-        @Override public Tuple3<Long, Long, Long> merge(Tuple3<Long, Long, Long> a, Tuple3<Long, Long, Long> b) {
-            return new Tuple3<>(a.f0, a.f1 + b.f1, 0L);
-        }
-        @Override public Tuple3<Long, Long, Long> getResult(Tuple3<Long, Long, Long> acc) { return acc; }
-    }
-
-    /**
-     * 處理視窗結果，帶入視窗結束時間
-     */
-    public static class WindowResultFunction extends ProcessWindowFunction<Tuple3<Long, Long, Long>, Tuple3<Long, Long, Long>, Long, TimeWindow> {
-        @Override
-        public void process(Long key, Context context, Iterable<Tuple3<Long, Long, Long>> elements, Collector<Tuple3<Long, Long, Long>> out) {
-            Tuple3<Long, Long, Long> next = elements.iterator().next();
-            out.collect(new Tuple3<>(next.f0, next.f1, context.window().getEnd()));
-        }
-    }
-
-    /**
-     * 在同一個 WindowEnd 的所有資料中找出 Max 並輸出
-     */
-    public static class GetMaxProcessFunction extends ProcessWindowFunction<Tuple3<Long, Long, Long>, String, Long, TimeWindow> {
-        @Override
-        public void process(Long windowEnd, Context context, Iterable<Tuple3<Long, Long, Long>> elements, Collector<String> out) {
-            List<Tuple3<Long, Long, Long>> list = new ArrayList<>();
-            long maxCount = 0;
-            for (Tuple3<Long, Long, Long> e : elements) {
-                list.add(e);
-                if (e.f1 > maxCount) maxCount = e.f1;
-            }
-            for (Tuple3<Long, Long, Long> e : list) {
-                if (e.f1 == maxCount) {
-                    out.collect(e.f0 + "," + e.f1); // 輸出格式：AuctionID, Count
+                System.out.println("Stopping job " + jobClient.getJobID());
+                try {
+                    jobClient.cancel().get();
+                } catch (Exception e) {
+                    System.err.println("Warning: Failed to cancel job " + jobClient.getJobID());
                 }
             }
         }
     }
 
-    // --- 保持原有的 printSummary 和 Helper 方法 ---
+    // ── Helper classes ────────────────────────────────────────────────────────
+
+    /**
+     * Expands one bid into (size/slide) records, one per overlapping HOP window.
+     * Each record carries (auction, windowEnd, price, metadata) to increase the
+     * per-record payload and drive network saturation on bandwidth-limited TMs.
+     *
+     * metadata = url|extra|channel|dateTime (~83 chars, ~87 bytes UTF-8 encoded).
+     * Estimated record size: 8+8+8+87+framing ≈ 120 bytes.
+     * At 35k bids/s × 5 windows × 120B ≈ 21 MB/s per subtask > 18.75 MB/s limit.
+     */
+    public static class HopExpandFunction implements FlatMapFunction<Bid, Tuple4<Long, Long, Long, String>> {
+        private final long sizeMs;
+        private final long slideMs;
+
+        public HopExpandFunction(long sizeMs, long slideMs) {
+            this.sizeMs  = sizeMs;
+            this.slideMs = slideMs;
+        }
+
+        @Override
+        public void flatMap(Bid bid, Collector<Tuple4<Long, Long, Long, String>> out) {
+            long t    = bid.dateTime.toEpochMilli();
+            long minK = (t / slideMs) + 1;
+            long maxK = (t + sizeMs - 1) / slideMs;
+            // Build metadata once per bid; reuse across all 5 window copies.
+            String metadata = bid.url + "|" + bid.extra + "|" + bid.channel + "|" + bid.dateTime;
+            for (long k = minK; k <= maxK; k++) {
+                out.collect(new Tuple4<>(bid.auction, k * slideMs, bid.price, metadata));
+            }
+        }
+    }
+
+    /**
+     * Aggregates (count, maxPrice) per (auction, windowEnd) with a CPU-intensive
+     * bid-validation step that creates a measurable CPU bottleneck on count-group,
+     * independently of the network bottleneck on hop-group.
+     *
+     * Each add() call runs a 2500-iteration LCG hash (fraudScore) to simulate a
+     * real-world bid anomaly detection computation.  At 175k records/s per subtask:
+     *   175k × ~5 µs/call ≈ 875 ms/s busy → T_busy > 70% → CPU_BOTTLENECK signal.
+     *
+     * The hash result is used in the return value so the JIT cannot hoist or
+     * eliminate the loop.  Logically, score is never 0 (P ≈ 2⁻⁶⁴), so count
+     * always increments by exactly 1 and maxPrice is unaffected.
+     *
+     * Input : Tuple4(auction, windowEnd, price, metadata)
+     * Accum : Tuple4(auction, count, maxPrice, windowEnd)
+     * Output: Tuple4(auction, count, maxPrice, windowEnd)
+     */
+    public static class HopCountAggregate
+            implements AggregateFunction<
+                    Tuple4<Long, Long, Long, String>,
+                    Tuple4<Long, Long, Long, Long>,
+                    Tuple4<Long, Long, Long, Long>> {
+
+        @Override
+        public Tuple4<Long, Long, Long, Long> createAccumulator() {
+            return new Tuple4<>(0L, 0L, Long.MIN_VALUE, 0L);
+        }
+
+        @Override
+        public Tuple4<Long, Long, Long, Long> add(
+                Tuple4<Long, Long, Long, String> value,
+                Tuple4<Long, Long, Long, Long> acc) {
+            // Bid anomaly score: CPU-intensive hash over (auction, price).
+            // score != 0 virtually always (P(score==0) ≈ 2⁻⁶⁴), so count += 1 always.
+            // Branching on score forces the JIT to retain the entire computation.
+            long score = fraudScore(value.f0, value.f2);
+            return new Tuple4<>(
+                    value.f0,
+                    acc.f1 + (score != 0 ? 1L : 2L),
+                    Math.max(acc.f2, value.f2),
+                    value.f1);
+        }
+
+        @Override
+        public Tuple4<Long, Long, Long, Long> merge(
+                Tuple4<Long, Long, Long, Long> a,
+                Tuple4<Long, Long, Long, Long> b) {
+            return new Tuple4<>(a.f0, a.f1 + b.f1, Math.max(a.f2, b.f2), a.f3);
+        }
+
+        @Override
+        public Tuple4<Long, Long, Long, Long> getResult(Tuple4<Long, Long, Long, Long> acc) {
+            return acc;
+        }
+
+        /**
+         * 2500-round LCG hash used to simulate per-bid fraud scoring.
+         * Chosen constants are from Knuth / Steele & Vigna (widely-used LCG params).
+         */
+        private static long fraudScore(long auction, long price) {
+            long h = auction ^ (price * 0x9e3779b97f4a7c15L);
+            for (int i = 0; i < 2500; i++) {
+                h = h * 6364136223846793005L + 1442695040888963407L;
+            }
+            return h;
+        }
+    }
+
+    /**
+     * Within a windowEnd group, emits auction(s) with the maximum bid count.
+     * Output format: "auctionId,count,maxPrice"
+     */
+    public static class GetMaxProcessFunction
+            extends ProcessWindowFunction<Tuple4<Long, Long, Long, Long>, String, Long, TimeWindow> {
+
+        @Override
+        public void process(Long windowEnd, Context ctx,
+                            Iterable<Tuple4<Long, Long, Long, Long>> elements,
+                            Collector<String> out) {
+            long maxCount = 0;
+            List<Tuple4<Long, Long, Long, Long>> list = new ArrayList<>();
+            for (Tuple4<Long, Long, Long, Long> e : elements) {
+                list.add(e);
+                if (e.f1 > maxCount) maxCount = e.f1;
+            }
+            for (Tuple4<Long, Long, Long, Long> e : list) {
+                if (e.f1 == maxCount) {
+                    out.collect(e.f0 + "," + e.f1 + "," + e.f2);
+                }
+            }
+        }
+    }
+
+    // ── Summary printing (unchanged) ──────────────────────────────────────────
+
     public static void printSummary(LinkedHashMap<String, JobBenchmarkMetric> totalMetrics) {
         if (totalMetrics.isEmpty()) return;
         System.err.println("-------------------------------- Nexmark Results --------------------------------");
@@ -301,7 +465,13 @@ public class BenchmarkIsoQ5 {
         for (Map.Entry<String, JobBenchmarkMetric> entry : totalMetrics.entrySet()) {
             JobBenchmarkMetric m = entry.getValue();
             double tps = m.getEventsNum() / m.getTimeSeconds();
-            printLine(' ', "|", itemMaxLength, entry.getKey(), NUMBER_FORMAT.format(m.getEventsNum()), NUMBER_FORMAT.format(m.getCpu()), formatDoubleValue(m.getTimeSeconds()), formatDoubleValue(m.getCoresMultiplyTimeSeconds()), formatLongValuePerSecond((long) tps), formatLongValuePerSecond((long) (m.getEventsNum() / m.getCoresMultiplyTimeSeconds())));
+            printLine(' ', "|", itemMaxLength, entry.getKey(),
+                    NUMBER_FORMAT.format(m.getEventsNum()),
+                    NUMBER_FORMAT.format(m.getCpu()),
+                    formatDoubleValue(m.getTimeSeconds()),
+                    formatDoubleValue(m.getCoresMultiplyTimeSeconds()),
+                    formatLongValuePerSecond((long) tps),
+                    formatLongValuePerSecond((long) (m.getEventsNum() / m.getCoresMultiplyTimeSeconds())));
         }
     }
 
@@ -312,7 +482,8 @@ public class BenchmarkIsoQ5 {
         printLine('-', "+", itemMaxLength, "", "", "", "");
         for (Map.Entry<String, JobBenchmarkMetric> entry : totalMetrics.entrySet()) {
             JobBenchmarkMetric m = entry.getValue();
-            printLine(' ', "|", itemMaxLength, entry.getKey(), m.getPrettyTps(), m.getPrettyCpu(), m.getPrettyTpsPerCore());
+            printLine(' ', "|", itemMaxLength, entry.getKey(),
+                    m.getPrettyTps(), m.getPrettyCpu(), m.getPrettyTpsPerCore());
         }
     }
 
@@ -320,7 +491,9 @@ public class BenchmarkIsoQ5 {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < items.length; i++) {
             builder.append(separator).append(items[i]);
-            for (int j = 0; j < itemMaxLength[i] - items[i].length() - separator.length(); j++) builder.append(charToFill);
+            for (int j = 0; j < itemMaxLength[i] - items[i].length() - separator.length(); j++) {
+                builder.append(charToFill);
+            }
         }
         builder.append(separator);
         System.err.println(builder.toString());
@@ -331,6 +504,7 @@ public class BenchmarkIsoQ5 {
         options.addOption(QUERIES);
         options.addOption(CATEGORY);
         options.addOption(LOCATION);
+        options.addOption(SUBMIT_ONLY);
         return options;
     }
 }

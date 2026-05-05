@@ -251,9 +251,11 @@ class FlinkDetector:
             # Sum actual_input_rate and max_capacity across all subtasks of this operator
             total_actual_input_rate = sum(task_info[st]["actual_input_rate"] for st in subtasks)
             total_max_capacity = sum(task_info[st]["max_capacity"] for st in subtasks)
+            avg_busy = sum(task_info[st]["T_busy"] for st in subtasks) / len(subtasks)
+            avg_idle = sum(task_info[st]["T_idle"] for st in subtasks) / len(subtasks)
 
             # Operator-level bottleneck check: total_actual_input_rate > total_max_capacity
-            if total_actual_input_rate > total_max_capacity and total_max_capacity > 0:
+            if total_actual_input_rate > total_max_capacity and total_max_capacity > 0 and avg_idle < 0.8:
                 bottleneck_operators.add(op_name)
                 print(f"Operator '{op_name}' is a bottleneck with total_actual_input_rate={total_actual_input_rate} and total_max_capacity={total_max_capacity}")
 
@@ -336,9 +338,13 @@ class FlinkDetector:
 
     def get_taskmanager_info(self):
         """
-        查詢所有 TaskManager 的資訊和當前負載，包含 CPU 容量限制
-        使用 Prometheus 獲取負載資訊，並自動添加已註冊但空閒的 TM
-        返回: { resource_id: {"host": "192.168.1.100", "current_load": 0.5, "cpu_limit": 1.5}, ... }
+        查詢所有 TaskManager 的資訊和當前負載，包含 CPU 容量限制。
+
+        [Fix Bug 1 & 2] 改用 sum(busyTimeMsPerSecond) by resource_id 取代 avg，
+        使 tm_load_tracker 與單一 subtask 的 cpu_demand（T_busy × 1000）語義一致：
+        兩者都代表 ms/s 的加總，而非平均值。
+
+        返回: { resource_id: {"host": "...", "current_load": float, "cpu_limit": float} }
         """
         try:
             # CPU capacity mapping based on docker-compose.yml
@@ -351,8 +357,11 @@ class FlinkDetector:
                 "tm_20c_5": 1.0
             }
 
-            # Step 1: Query Prometheus for load information from busy TMs
-            query = 'avg(flink_taskmanager_job_task_busyTimeMsPerSecond) by (resource_id, tm_id, host)'
+            # [Fix Bug 1 & 2] 使用 sum 而非 avg，讓 current_load 代表
+            # 該 TM 上所有 subtask busyTimeMsPerSecond 的總和（ms/s）。
+            # 這樣 pre-deduct 和 add-back 時直接加減 cpu_demand（同為 ms/s 總和）
+            # 才是語義正確的操作，不會產生規模不符導致的負值。
+            query = 'sum(flink_taskmanager_job_task_busyTimeMsPerSecond) by (resource_id, tm_id, host)'
             response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query})
             data = response.json()
 
@@ -463,7 +472,7 @@ class FlinkDetector:
         返回: { resource_id: bytes_per_second }
         """
         try:
-            query = 'sum(flink_taskmanager_job_task_numBytesOutPerSecond) by (resource_id)'
+            query = 'sum(flink_taskmanager_job_task_numBytesOutPerSecond) by (resource_id, tm_id, host)'
             response = requests.get(f"{self.base_url}/api/v1/query", params={'query': query})
             data = response.json()
 
@@ -546,7 +555,21 @@ class FlinkDetector:
           - WASP hard filter: available_slots >= 1  AND
                               (current_network + subtask_network) <= alpha * network_capacity
           - Amnis objective:  argmin(C_v / O_v) among candidates
-                              (C_v = node_current_load + subtask_load, O_v = cpu_limit * 1000)
+                              C_v = sum(busyMs on TM) + subtask_cpu_demand  (both in ms/s)
+                              O_v = cpu_limit * MAX_SLOTS_PER_TM * 1000     (ms/s ceiling)
+
+        [Fix Bug 1 & 2]
+          tm_load_tracker 初始化自 sum(busyTimeMsPerSecond) per TM（已在
+          get_taskmanager_info 修正為 sum query），與 cpu_demand（T_busy×1000）
+          同單位，pre-deduct / add-back 不再產生不合理負值。
+          O_v 改為 cpu_limit × MAX_SLOTS_PER_TM × 1000，代表 TM 可承擔的
+          busy ms/s 總上限，使 C_v/O_v 比率有實際物理意義。
+
+        [Fix Bug 4]
+          net_demand 改用每個 subtask 的 numBytesOutPerSecond（bytes/s），
+          與 network_capacity_map 及 tm_net_tracker 同單位，移除依賴全叢集
+          宏觀比率換算的 records_to_bytes_scale，避免瓶頸期係數爆炸導致
+          WASP 濾除所有候選節點。
 
         Returns: { "subtask_id": "target_resource_id", ... }
         """
@@ -580,8 +603,8 @@ class FlinkDetector:
         network_capacity_map = {
             "tm_20c_1":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
             "tm_20c_2":     int(18.75 * 1024 * 1024),  # 150 Mbit/s = 18.75 MB/s   ← network-constrained TM
-            "tm_20c_3":     int(18.75 * 1024 * 1024),   # 150 Mbit/s = 18.75 MB/s  ← network-constrained TM
-            "tm_20c_4":     int(37.5 * 1024 * 1024),  # 300 Mbit/s = 37.5 MB/s
+            "tm_20c_3":     int(18.75 * 1024 * 1024),  # 150 Mbit/s = 18.75 MB/s   ← network-constrained TM
+            "tm_20c_4":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
             "tm_20c_5":     int(37.5 * 1024 * 1024),   # 300 Mbit/s = 37.5 MB/s
         }
 
@@ -599,23 +622,32 @@ class FlinkDetector:
             print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, CPU: {cpu_limit}, "
                   f"Net: {net_used:.1f}/{net_cap:.0f} MB/s")
 
+        # ── [Fix Bug 4] 查詢每個 subtask 的 numBytesOutPerSecond ───────────────
+        # 直接使用 bytes/s，與 network_capacity_map 同單位，不需要跨量綱換算。
+        bytes_out_map = self.query_metric_by_task(
+            'flink_taskmanager_job_task_numBytesOutPerSecond'
+        )
+
         # ── Step 2: Neptune — compute interference scores and sort Ω ──────────
         # CPU demand proxy  : T_busy (ms/s, range 0–1000)
-        # Network demand proxy: observed_rate (records/s) — traffic volume proxy
+        # [Fix Bug 4] Network demand proxy: numBytesOutPerSecond (bytes/s) per subtask
         migration_candidates = []
         for subtask_id, actual_rate in overloaded_subtasks:
             if hasattr(self, '_task_info') and subtask_id in self._task_info:
                 info = self._task_info[subtask_id]
-                cpu_demand = info['T_busy'] * 1000       # convert back to ms/s
-                net_demand = info['observed_rate']       # records/s as bandwidth proxy
+                task_name = info['task_name']
+                idx = info['subtask_index']
+                cpu_demand = info['T_busy'] * 1000       # ms/s
+                # [Fix Bug 4] 直接取該 subtask 的 bytes/s，不再透過宏觀比率換算
+                net_demand_bytes = bytes_out_map.get(task_name, {}).get(idx, 0.0)
             else:
                 cpu_demand = actual_rate
-                net_demand = actual_rate
+                net_demand_bytes = 0.0
             migration_candidates.append({
                 'subtask_id': subtask_id,
                 'actual_rate': actual_rate,
                 'cpu_demand': cpu_demand,
-                'net_demand': net_demand,
+                'net_demand': net_demand_bytes,   # bytes/s
             })
 
         # Normalize CPU and network demands to [0, 1] range
@@ -636,7 +668,7 @@ class FlinkDetector:
         print(f"\n🔍 [Neptune] {len(migration_candidates)} 個 Subtask 已按干擾分數排序 (n={NEPTUNE_N})")
         for c in migration_candidates:
             print(f"   {c['subtask_id']}: score={c['interference_score']:.4f} "
-                  f"(cpu_demand={c['cpu_demand']:.1f}, net_demand={c['net_demand']:.2f})")
+                  f"(cpu_demand={c['cpu_demand']:.1f}, net_demand_bytes={c['net_demand']:.2f})")
 
         # ── Initialize migration plan: everyone stays put initially ───────────
         migration_plan = {}
@@ -644,25 +676,23 @@ class FlinkDetector:
             migration_plan[subtask_id] = current_resource_id
 
         # Track mutable state: load and network usage per TM
+        # [Fix Bug 1 & 2] tm_load_tracker 現在存的是 sum(busyMs) per TM（ms/s 總和），
+        # 和 cpu_demand 同單位，pre-deduct / add-back 才有意義。
         tm_load_tracker = {rid: info['current_load'] for rid, info in tm_info.items()}
+        # [Fix Bug 4] tm_net_tracker 使用 bytes/s，與 net_demand（bytes/s）同單位
         tm_net_tracker = {rid: network_usage.get(rid, 0.0) for rid in tm_info.keys()}
 
-        # Estimate per-subtask network demand in bytes using average across candidates
-        # so WASP constraint uses the same unit as network_capacity_map
-        total_net_demand_records = sum(c['net_demand'] for c in migration_candidates) or 1.0
-        total_net_usage_bytes = sum(tm_net_tracker.values()) or 1.0
-        # Conversion factor: scale records/s demand to bytes proportionally to observed usage
-        records_to_bytes_scale = total_net_usage_bytes / total_net_demand_records
-
-        # ── Pre-deduct: 資源預扣除 vacate source TM slots for all bottleneck subtasks ────
+        # ── Pre-deduct: 資源預扣除 vacate source TM slots for all bottleneck subtasks ──
         # This reflects that the entire bottleneck operator is stopped before any
         # subtask is reassigned, so the source nodes' slots are freed upfront.
         for candidate in migration_candidates:
             src = current_locations.get(candidate['subtask_id'], 'unknown')
             if src in slot_occupancy:
                 slot_occupancy[src] -= 1
+                # [Fix Bug 1 & 2] cpu_demand (ms/s) 與 tm_load_tracker (sum busyMs, ms/s) 同單位
                 tm_load_tracker[src] -= candidate['cpu_demand']
-                tm_net_tracker[src] -= candidate['net_demand'] * records_to_bytes_scale
+                # [Fix Bug 4] net_demand 已是 bytes/s，直接加減，不需乘換算係數
+                tm_net_tracker[src] -= candidate['net_demand']
 
         # ── Step 3: WASP filter + Amnis argmin(C_v / O_v) selection ──────────
         for candidate in migration_candidates:
@@ -673,8 +703,8 @@ class FlinkDetector:
                 print(f"⚠️ {subtask_id} 的 resource_id {current_resource_id} 不在 TM 列表中，跳過")
                 continue
 
-            subtask_cpu_load = candidate['cpu_demand']   # ms/s, added to tm_load_tracker
-            subtask_net_bytes = candidate['net_demand'] * records_to_bytes_scale
+            subtask_cpu_load = candidate['cpu_demand']       # ms/s
+            subtask_net_bytes = candidate['net_demand']      # bytes/s（已是正確單位）
 
             best_node = None
             best_congestion_ratio = float('inf')
@@ -685,15 +715,18 @@ class FlinkDetector:
                     continue
 
                 # ── WASP hard constraint 2: bandwidth threshold ────────────
-                net_cap = network_capacity_map.get(rid, 250 * 1024 * 1024)
+                # [Fix Bug 4] subtask_net_bytes 已是 bytes/s，與 net_cap 同單位，直接比較
+                net_cap = network_capacity_map.get(rid, int(37.5 * 1024 * 1024))
                 if (tm_net_tracker[rid] + subtask_net_bytes) > WASP_ALPHA * net_cap:
                     continue
 
                 # ── Amnis objective: argmin(C_v / O_v) ───────────────────
-                # C_v: total resource requirement after placing this subtask
-                # O_v: resource capacity of the node (cpu_limit * 1000 ms/s)
+                # C_v: TM 上現有 busy 總量 + 即將放入的 subtask busy 需求（ms/s）
+                # O_v: TM 的 CPU 吞吐上限 = cpu_limit × MAX_SLOTS_PER_TM × 1000 ms/s
+                # [Fix Bug 1 & 2] O_v 使用 slots × 1000 使容量有物理意義，
+                # 讓雙核 TM（O_v=10000）比單核 TM（O_v=5000）有更大的承接能力。
                 C_v = tm_load_tracker[rid] + subtask_cpu_load
-                O_v = info['cpu_limit'] * 1000.0
+                O_v = info['cpu_limit'] * MAX_SLOTS_PER_TM * 1000.0
                 congestion_ratio = C_v / O_v if O_v > 0 else float('inf')
                 print(f"   {subtask_id} -> {rid}: C_v={C_v:.3f}, O_v={O_v:.3f}, congestion_ratio={congestion_ratio:.3f} ")
 
@@ -749,7 +782,7 @@ class FlinkDetector:
         for rid, count in slot_occupancy.items():
             cpu_limit = tm_info[rid]['cpu_limit']
             C_v = tm_load_tracker[rid]
-            O_v = cpu_limit * 1000.0
+            O_v = cpu_limit * MAX_SLOTS_PER_TM * 1000.0
             print(f"   {rid}: {count}/{MAX_SLOTS_PER_TM} slots, "
                   f"C_v/O_v={C_v/O_v:.3f} (cpu_limit={cpu_limit})")
 
@@ -945,7 +978,7 @@ class FlinkDetector:
             running_jobs = self.get_running_jobs()
             if not running_jobs: return False
             job_id = running_jobs[0]
-            
+
         # 遷移前確認 job 仍在 RUNNING，避免對已 FINISHED 的 job 取 savepoint
         try:
             resp = requests.get(f"{self.flink_rest_url}/jobs/{job_id}")
@@ -1048,15 +1081,21 @@ class FlinkDetector:
         event_time        = time.time()
         current_locations = self.get_subtask_locations()
 
-        # Rebuild Neptune interference scores for Prioritization rows
+        # [Fix Bug 4] Rebuild Neptune interference scores using bytes/s for net_demand
+        bytes_out_map = self.query_metric_by_task(
+            'flink_taskmanager_job_task_numBytesOutPerSecond'
+        )
         migration_candidates = []
         for subtask_id, actual_rate, max_cap in self._bottleneck_subtasks:
             info = self._task_info.get(subtask_id, {})
+            task_name = info.get('task_name', '')
+            idx = info.get('subtask_index', 0)
+            net_demand_bytes = bytes_out_map.get(task_name, {}).get(idx, 0.0)
             migration_candidates.append({
                 "subtask_id":          subtask_id,
                 "actual_rate":         actual_rate,
                 "cpu_demand":          info.get("T_busy", 0) * 1000,
-                "net_demand":          info.get("observed_rate", 0),
+                "net_demand":          net_demand_bytes,   # bytes/s
             })
         max_cpu = max((c["cpu_demand"] for c in migration_candidates), default=1.0) or 1.0
         max_net = max((c["net_demand"] for c in migration_candidates), default=1.0) or 1.0
@@ -1082,7 +1121,7 @@ class FlinkDetector:
             for rank, c in enumerate(migration_candidates, start=1):
                 writer.writerow([event_time, "Prioritization", c["subtask_id"], rank,
                                  current_locations.get(c["subtask_id"], "unknown"), "",
-                                 f"Neptune_score={c['interference_score']:.4f} (Rank {rank})"])
+                                 f"Neptune_score={c['interference_score']:.4f} (Rank {rank}), net_demand_bytes={c['net_demand']:.1f}"])
             # Assignment
             for subtask_id, target_tm in migration_plan.items():
                 original_tm = current_locations.get(subtask_id, "unknown")

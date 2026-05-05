@@ -7,21 +7,31 @@
 import sys
 import os
 import time
+import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from propose_v6 import FlinkPropose
+from propose_v8 import FlinkPropose, JOB_CONFIG
 
 def main():
+    parser = argparse.ArgumentParser(description="propose 自動遷移系統")
+    parser.add_argument("--query", required=True, choices=list(JOB_CONFIG.keys()),
+                        help="Nexmark query to monitor")
+    parser.add_argument("--id", dest="output_id", default="t16",
+                        help="Experiment output folder name (default: t16)")
+    args = parser.parse_args()
+
     print("=== propose 自動遷移系統 ===")
+
+    cfg = JOB_CONFIG[args.query]
 
     # Job 配置（用於自動重新提交）
     job_config = {
         "container": "jobmanager",
-        "entry_class": "com.github.nexmark.flink.BenchmarkIsoQ7",
+        "entry_class": cfg["entry_class"],
         "parallelism": 4,
         "jar_path": "/opt/flink/usrlib/nexmark.jar",
         "nexmark_conf_dir": "/opt/nexmark",
         "program_args": [
-            "--queries", "q7-isolated",
+            "--queries", cfg["queries_arg"],
             "--location", "/opt/nexmark",
             "--suite-name", "100m",
             "--category", "oa",
@@ -32,6 +42,8 @@ def main():
 
     # 初始化 propose
     propose = FlinkPropose(
+        query_type=args.query,
+        output_id=args.output_id,
         prometheus_url="http://localhost:9090",
         flink_rest_url="http://localhost:8081",
         migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
@@ -39,9 +51,6 @@ def main():
         job_config=job_config
     )
 
-    # 設定閾值
-    BUSY_THRESHOLD = 850      # busyTime 超過 700ms 視為過載
-    SKEW_THRESHOLD = 200      # 傾斜度超過 200 觸發遷移
     CHECK_INTERVAL = 30       # 每 30 秒檢查一次
 
     print(f"📊 監控參數:")
@@ -50,32 +59,21 @@ def main():
     print(f"   - Savepoint 目錄: {propose.savepoint_dir}")
     print("\n開始監控...\n")
 
-    time.sleep(60)
+    time.sleep(20)
 
     try:
         while True:
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             print(f"\n[{timestamp}] Propose 檢查叢集狀態...")
 
-            # 顯示每個 subtask 的即時監控指標
-            propose.print_subtask_status()
+            # 確認有 job 在執行且有 checkpoint，避免與 auto_detect_and_migrate 重複執行 detect_bottleneck
+            running_jobs = propose.get_running_jobs()
 
-            # 顯示當前狀態
-            reports = propose.detect_bottleneck()
 
-            if reports:
-                print("\n當前狀態:")
-                for r in reports:
-                    print(f"  {r['status']} {r['task_name']}:")
-                    print(f"    - 實際輸入速率 (Actual Rate): {r['avg_actual_rate']} rec/s")
-                    print(f"    - 最大處理容量 (Max Capacity): {r['avg_max_capacity']} rec/s")
-                    print(f"    - Busy: {r['max_busy']:.0f} ms/s, Backpressure: {r['max_bp']:.0f} ms/s")
+            if running_jobs:
 
                 # 嘗試自動遷移
-                migrated = propose.auto_detect_and_migrate(
-                    busy_threshold=BUSY_THRESHOLD,
-                    skew_threshold=SKEW_THRESHOLD
-                )
+                migrated = propose.auto_detect_and_migrate()
 
                 if migrated:
                     print("\n✅ 已觸發遷移流程")

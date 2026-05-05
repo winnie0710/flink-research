@@ -7,36 +7,28 @@ CAOM 自動遷移腳本
 import sys
 import os
 import time
+import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from baseline import FlinkDetector
+from baseline_v2 import FlinkDetector
 
 def main():
+    parser = argparse.ArgumentParser(description="CAOM Baseline Auto Migration")
+    parser.add_argument("--query", required=True, choices=["q4", "q5", "q7"],
+                        help="Nexmark query to monitor (q4, q5, or q7)")
+    parser.add_argument("--id", dest="output_id", default="t16",
+                        help="Experiment output folder name (default: t16)")
+    args = parser.parse_args()
+
     print("=== CAOM 自動遷移系統 ===")
 
-    # Job 配置（用於自動重新提交）
-    job_config = {
-        "container": "jobmanager",
-        "entry_class": "com.github.nexmark.flink.BenchmarkIsoQ7",
-        "parallelism": 4,
-        "jar_path": "/opt/flink/usrlib/nexmark.jar",
-        "nexmark_conf_dir": "/opt/nexmark",
-        "program_args": [
-            "--queries", "q7-isolated",
-            "--location", "/opt/nexmark",
-            "--suite-name", "100m",
-            "--category", "oa",
-            "--kafka-server", "kafka:9092",
-            "--submit-only"
-        ]
-    }
-
-    # 初始化 Detector
+    # 初始化 Detector（JOB_CONFIG 由 baseline.py 內部根據 query_type 自動套用）
     detector = FlinkDetector(
+        query_type=args.query,
+        output_id=args.output_id,
         prometheus_url="http://localhost:9090",
         flink_rest_url="http://localhost:8081",
         migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
         savepoint_dir="file:///opt/flink/savepoints",
-        job_config=job_config
     )
 
     # 設定閾值
@@ -51,7 +43,7 @@ def main():
     print(f"   - 遷移計畫路徑: {detector.migration_plan_path}")
     print(f"   - Savepoint 目錄: {detector.savepoint_dir}")
     print("\n開始監控...\n")
-    time.sleep(10)
+    time.sleep(20)
 
     try:
         while True:

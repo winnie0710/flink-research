@@ -1,0 +1,68 @@
+Benchmark Queries: [q7-isolated]
+--- NEXMARK CONFIGURATION ---
+kafka.bootstrap.servers: kafka:9092
+Clearing previous CPU metrics before starting query: q7-isolated
+>>> Starting Custom Logic for: q7-isolated
+Submitting Q7 Isolated Job...
+Job has been submitted with JobID 3c8511e9ee392efaec8724728f2271cf
+Job Submitted with ID: 3c8511e9ee392efaec8724728f2271cf
+Waiting for job to start running...
+Job is now RUNNING
+Monitor metrics after 10 seconds.
+Start to monitor metrics for 3600 seconds.
+Available vertices: [0] Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map, [1] Window-Max -> Map, [2] Window-Join, [3] Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer, 
+Selected source vertex: Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map (ID: bef22c5df1ab33dd94bb7a6ecac555fb)
+Available vertices: [0] Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map, [1] Window-Max -> Map, [2] Window-Join, [3] Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer, 
+Selected source vertex: Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map (ID: bef22c5df1ab33dd94bb7a6ecac555fb)
+Available vertices: [0] Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map, [1] Window-Max -> Map, [2] Window-Join, [3] Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer, 
+Selected source vertex: Source: Source: KafkaSource -> Filter-Bids -> Map-To-Bid -> Map (ID: bef22c5df1ab33dd94bb7a6ecac555fb)
+Current Throughput=8.64 K, Cores=3.23 (5 TMs)
+Current Throughput=8.64 K, Cores=4.11 (5 TMs)
+Current Throughput=8.64 K, Cores=2.44 (5 TMs)
+Current Throughput=26.24 K, Cores=2.07 (5 TMs)
+Current Throughput=26.24 K, Cores=2.15 (5 TMs)
+Current Throughput=36.5 K, Cores=1.96 (5 TMs)
+Current Throughput=36.5 K, Cores=2.1 (5 TMs)
+Current Throughput=51.09 K, Cores=2.39 (5 TMs)
+Current Throughput=51.09 K, Cores=2.14 (5 TMs)
+Current Throughput=66.33 K, Cores=2.53 (5 TMs)
+Current Throughput=66.33 K, Cores=1.67 (5 TMs)
+Current Throughput=76.91 K, Cores=2.27 (5 TMs)
+Current Throughput=76.91 K, Cores=1.98 (5 TMs)
+Current Throughput=80.35 K, Cores=1.96 (5 TMs)
+Current Throughput=80.35 K, Cores=1.68 (5 TMs)
+Current Throughput=79.26 K, Cores=2.04 (5 TMs)
+Current Throughput=79.26 K, Cores=1.47 (5 TMs)
+Current Throughput=80.29 K, Cores=1.78 (5 TMs)
+Current Throughput=80.29 K, Cores=1.95 (5 TMs)
+Current Throughput=80.24 K, Cores=2.14 (5 TMs)
+Current Throughput=80.24 K, Cores=1.93 (5 TMs)
+Current Throughput=79.32 K, Cores=1.6 (5 TMs)
+Current Throughput=79.32 K, Cores=1.35 (5 TMs)
+Current Throughput=79.73 K, Cores=2.06 (5 TMs)
+Current Throughput=79.73 K, Cores=1.8 (5 TMs)
+Current Throughput=80.24 K, Cores=1.97 (5 TMs)
+Current Throughput=80.24 K, Cores=1.68 (5 TMs)
+Current Throughput=80.17 K, Cores=1.86 (5 TMs)
+Current Throughput=80.17 K, Cores=1.72 (5 TMs)
+Current Throughput=79.71 K, Cores=1.74 (5 TMs)
+Current Throughput=79.71 K, Cores=1.72 (5 TMs)
+Current Throughput=80.19 K, Cores=2.27 (5 TMs)
+Current Throughput=80.19 K, Cores=1.95 (5 TMs)
+Current Throughput=79.93 K, Cores=1.84 (5 TMs)
+Current Throughput=79.93 K, Cores=1.48 (5 TMs)
+Current Throughput=79.86 K, Cores=1.73 (5 TMs)
+Current Throughput=79.86 K, Cores=1.98 (5 TMs)
+Current Throughput=79.25 K, Cores=1.86 (5 TMs)
+Current Throughput=79.25 K, Cores=1.67 (5 TMs)
+Current Throughput=80.16 K, Cores=1.54 (5 TMs)
+Current Throughput=80.16 K, Cores=1.65 (5 TMs)
+Current Throughput=79.81 K, Cores=1.62 (5 TMs)
+Current Throughput=79.81 K, Cores=1.75 (5 TMs)
+Current Throughput=79.79 K, Cores=2.24 (5 TMs)
+Current Throughput=79.79 K, Cores=1.55 (5 TMs)
+Current Throughput=80.25 K, Cores=1.52 (5 TMs)
+Current Throughput=80.25 K, Cores=1.31 (5 TMs)
+Current Throughput=79.61 K, Cores=1.76 (5 TMs)
+Current Throughput=79.61 K, Cores=2.12 (5 TMs)
+Current Throughput=80.13 K, Cores=2.01 (5 TMs)

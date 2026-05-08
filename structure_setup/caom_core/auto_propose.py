@@ -9,7 +9,7 @@ import os
 import time
 import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from propose_v8 import FlinkPropose, JOB_CONFIG
+from propose_v9 import FlinkPropose, JOB_CONFIG
 
 def main():
     parser = argparse.ArgumentParser(description="propose 自動遷移系統")
@@ -17,6 +17,8 @@ def main():
                         help="Nexmark query to monitor")
     parser.add_argument("--id", dest="output_id", default="t16",
                         help="Experiment output folder name (default: t16)")
+    parser.add_argument("--initial-placement", dest="initial_placement_path", default=None,
+                        help="若指定，第一次遷移前將 Flink 初始 Subtask 配置備份到此路徑")
     args = parser.parse_args()
 
     print("=== propose 自動遷移系統 ===")
@@ -48,7 +50,8 @@ def main():
         flink_rest_url="http://localhost:8081",
         migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
         savepoint_dir="file:///opt/flink/savepoints",
-        job_config=job_config
+        initial_placement_path=args.initial_placement_path,
+        #job_config=job_config
     )
 
     CHECK_INTERVAL = 30       # 每 30 秒檢查一次

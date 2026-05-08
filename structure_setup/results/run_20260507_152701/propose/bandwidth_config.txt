@@ -1,0 +1,5 @@
+tm-20c-1:300mbit
+tm-20c-2:150mbit
+tm-20c-3:150mbit
+tm-20c-4:300mbit
+tm-20c-5:300mbit

@@ -1,0 +1,71 @@
+Submitting Q5 Isolated Job...
+Job has been submitted with JobID fdcfa151f2777f859ed42a0301adefd5
+Job submitted with ID: fdcfa151f2777f859ed42a0301adefd5
+Waiting for job to start running...
+Job is now RUNNING
+Monitor metrics after 10 seconds.
+Start to monitor metrics for 3600 seconds.
+Available vertices: [0] Source: Source: KafkaSource -> Filter -> Filter-Map-Bids, [1] HOP-Expand-5x -> Timestamps/Watermarks, [2] Window-Auction-Count, [3] Window-Max-Filter -> Sink: KafkaSink: Writer -> Sink: KafkaSink: Committer, 
+Selected source vertex: Source: Source: KafkaSource -> Filter -> Filter-Map-Bids (ID: bef22c5df1ab33dd94bb7a6ecac555fb)
+Current Throughput=13.68 K, Cores=3.5 (5 TMs)
+Current Throughput=13.68 K, Cores=4.33 (5 TMs)
+Current Throughput=13.68 K, Cores=3.8 (5 TMs)
+Current Throughput=29.24 K, Cores=3.89 (5 TMs)
+Current Throughput=29.24 K, Cores=3.83 (5 TMs)
+Current Throughput=42.32 K, Cores=4.09 (5 TMs)
+Current Throughput=42.32 K, Cores=3.95 (5 TMs)
+Current Throughput=57.62 K, Cores=3.9 (5 TMs)
+Current Throughput=57.62 K, Cores=4.03 (5 TMs)
+Current Throughput=71.44 K, Cores=4.23 (5 TMs)
+Current Throughput=71.44 K, Cores=3.87 (5 TMs)
+Current Throughput=84.13 K, Cores=4.03 (5 TMs)
+Current Throughput=84.13 K, Cores=4.02 (5 TMs)
+Current Throughput=80.96 K, Cores=3.9 (5 TMs)
+Current Throughput=80.96 K, Cores=4.03 (5 TMs)
+Current Throughput=83.39 K, Cores=4.11 (5 TMs)
+Current Throughput=83.39 K, Cores=4.12 (5 TMs)
+Current Throughput=88.63 K, Cores=4.02 (5 TMs)
+Current Throughput=88.63 K, Cores=4.12 (5 TMs)
+Current Throughput=97.25 K, Cores=3.83 (5 TMs)
+Current Throughput=97.25 K, Cores=3.69 (5 TMs)
+Current Throughput=99.94 K, Cores=4.02 (5 TMs)
+Current Throughput=99.94 K, Cores=3.86 (5 TMs)
+Current Throughput=104.24 K, Cores=4.08 (5 TMs)
+Current Throughput=104.24 K, Cores=3.93 (5 TMs)
+Current Throughput=104.97 K, Cores=3.95 (5 TMs)
+Current Throughput=104.97 K, Cores=3.84 (5 TMs)
+Current Throughput=112.42 K, Cores=3.96 (5 TMs)
+Current Throughput=112.42 K, Cores=3.91 (5 TMs)
+Current Throughput=114.51 K, Cores=3.88 (5 TMs)
+Current Throughput=114.51 K, Cores=3.86 (5 TMs)
+Stopping job fdcfa151f2777f859ed42a0301adefd5
+
+------------------------------------------------------------
+ The program finished with the following exception:
+
+org.apache.flink.client.program.ProgramInvocationException: The main method caused an error: Failed to run isolated Q5
+	at org.apache.flink.client.program.PackagedProgram.callMainMethod(PackagedProgram.java:372)
+	at org.apache.flink.client.program.PackagedProgram.invokeInteractiveModeForExecution(PackagedProgram.java:222)
+	at org.apache.flink.client.ClientUtils.executeProgram(ClientUtils.java:108)
+	at org.apache.flink.client.cli.CliFrontend.executeProgram(CliFrontend.java:1026)
+	at org.apache.flink.client.cli.CliFrontend.run(CliFrontend.java:247)
+	at org.apache.flink.client.cli.CliFrontend.parseAndRun(CliFrontend.java:1270)
+	at org.apache.flink.client.cli.CliFrontend.lambda$mainInternal$10(CliFrontend.java:1367)
+	at org.apache.flink.runtime.security.contexts.NoOpSecurityContext.runSecured(NoOpSecurityContext.java:28)
+	at org.apache.flink.client.cli.CliFrontend.mainInternal(CliFrontend.java:1367)
+	at org.apache.flink.client.cli.CliFrontend.main(CliFrontend.java:1335)
+Caused by: java.lang.RuntimeException: Failed to run isolated Q5
+	at com.github.nexmark.flink.BenchmarkIsoQ5.runIsolatedQ5(BenchmarkIsoQ5.java:308)
+	at com.github.nexmark.flink.BenchmarkIsoQ5.executeQueries(BenchmarkIsoQ5.java:157)
+	at com.github.nexmark.flink.BenchmarkIsoQ5.runQueries(BenchmarkIsoQ5.java:116)
+	at com.github.nexmark.flink.BenchmarkIsoQ5.main(BenchmarkIsoQ5.java:101)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(Unknown Source)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(Unknown Source)
+	at java.base/java.lang.reflect.Method.invoke(Unknown Source)
+	at org.apache.flink.client.program.PackagedProgram.callMainMethod(PackagedProgram.java:355)
+	... 9 more
+Caused by: java.lang.RuntimeException: The metric reporter doesn't collect any metrics.
+	at com.github.nexmark.flink.metric.MetricReporter.reportMetric(MetricReporter.java:193)
+	at com.github.nexmark.flink.BenchmarkIsoQ5.runIsolatedQ5(BenchmarkIsoQ5.java:305)
+	... 17 more

@@ -120,6 +120,7 @@ class FlinkPropose:
                  flink_rest_url="http://localhost:8081",
                  migration_plan_path="/home/yenwei/research/structure_setup/plan/migration_plan.json",
                  savepoint_dir="file:///opt/flink/savepoints",
+                 initial_placement_path=None,
                  job_config=None):
         self.base_url = prometheus_url
         self.flink_rest_url = flink_rest_url
@@ -168,6 +169,18 @@ class FlinkPropose:
             "tm_20c_5": int(37.5 * 1024 * 1024),
         }
         self.default_bandwidth = int(37.5 * 1024 * 1024)
+
+        # ── 遷移觸發的 latency 門檻 ──
+        # 冷卻期結束後，還需要當下 latency 超過此值才真正寫入 migration_plan 並遷移
+        # 設為 0 表示不額外限制（只靠冷卻期）
+        self.migration_latency_threshold = 20000   # ms
+
+        # ── 初始配置備份 ──
+        # initial_placement_path: 若指定，則在第一次 auto_detect_and_migrate 執行時，
+        # 將當前 migration_plan.json（Flink 原生分配的結果，尚未被 propose 修改）
+        # 備份到此路徑，格式與 migration_plan.json 完全相同，供 baseline 使用。
+        self.initial_placement_path = initial_placement_path
+        self._initial_placement_saved = False   # 確保只備份一次
 
     # ══════════════════════════════════════════════════════════════════════════
     # Prometheus / Flink REST 查詢工具
@@ -314,7 +327,8 @@ class FlinkPropose:
         print("STEP 1: 顯性瓶頸偵測（不依賴 bp 反推）")
         print("=" * 100)
         explicit_set = self._detect_explicit(
-            task_info, operator_groups, ordered_operators, subtask_locations, tm_out_saturated
+            task_info, operator_groups, ordered_operators, subtask_locations,
+            tm_out_saturated, saturation_rates
         )
 
         print("\n" + "=" * 100)
@@ -491,7 +505,7 @@ class FlinkPropose:
     # Phase 1a/b/c：顯性瓶頸偵測
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _detect_explicit(self, task_info, operator_groups, ordered_operators, subtask_locations, tm_out_saturated):
+    def _detect_explicit(self, task_info, operator_groups, ordered_operators, subtask_locations, tm_out_saturated, saturation_rates):
         """
         顯性瓶頸偵測：三個子判斷均不依賴 bp 反推。
 
@@ -556,34 +570,41 @@ class FlinkPropose:
                     ds_infos = [task_info[dst] for dst in ds_subtasks if dst in task_info]
 
                     if ds_infos:
-                        # ── 受害者判定（同時滿足以下任一條件才視為受害者）────────
+                        # ── 受害者判定 ───────────────────────────────────────────
                         #
-                        # 條件 A：下游 inPool 的最大值 > 0.5
-                        #   意義：下游至少有一個 subtask 的輸入緩衝積壓，
-                        #         代表下游整體消化不了，本 subtask 是受害者。
-                        #   改用 max 而非 median，因為資料傾斜場景下部分 subtask
-                        #   inPool=1.0（積壓）而其他 subtask inPool=0.0（空閒），
-                        #   中位數被拉低導致誤判（實測案例：Window_Auction_Count
-                        #   inPool=[1.0, 0.0, 0.0, 0.188]，中位數=0.094 但 max=1.0）。
+                        # 正向條件（任一成立 → 傾向受害者）：
+                        #   A：下游 max_inPool > 0.5：下游至少一個 subtask 輸入積壓
+                        #      改用 max 而非 median，避免資料傾斜下中位數被低值
+                        #   C：T_bp > T_busy × 2：反壓時間遠超處理時間，自身資源充裕
                         #
-                        # 條件 B：下游算子存在 CPU 滿載的 subtask（T_busy > 0.85）
-                        #   意義：即使 inPool 中位數低，下游仍有 subtask 在滿載，
-                        #         這解釋了為何整個算子吞吐量上不來，本 subtask 是受害者。
-                        #   0.85 的依據：M/M/1 排隊理論在 ρ=0.85 時平均隊長 ρ/(1-ρ)≈5.7，
-                        #                即將進入飽和積壓狀態。
-                        #
-                        # 條件 C：本 subtask 自身 T_bp 顯著高於 T_busy
-                        #   意義：等待時間遠超處理時間，本 subtask 的資源明顯是充裕的，
-                        #         阻塞來自外部（下游施壓），是典型受害者特徵。
-                        ds_max_inpool  = max(d["in_pool_usage"]  for d in ds_infos)
-                        ds_max_busy    = max(d["T_busy"]         for d in ds_infos)
-                        is_victim = (
-                                ds_max_inpool > 0.5        # 條件 A
-                                or ds_max_busy > 0.85      # 條件 B
-                                or T_bp > T_busy * 2.0     # 條件 C：反壓時間是處理時間的 2 倍以上
-                        )
+                        # 否定條件 D（成立時覆蓋正向條件，判定為窄點而非受害者）：
+                        #   condD = outPool > 1.0 AND tm_sat > 叢集中位數
+                        #     outPool > 1.0：已耗盡 exclusive buffer 借用 floating buffer
+                        #       （Flink network buffer 機制），是輸出側積壓的強訊號
+                        #     tm_sat > 叢集中位數：TM 網路壓力高於正常水準，確認積壓
+                        #       源於 TM 網路瓶頸而非暫態波動
+                        #     此時即使 condC 成立（T_bp 高），也是 network-induced bp，
+                        #     不是下游施壓，不應歸類為受害者。
 
-                        if is_victim:
+                        ds_max_inpool = max(d["in_pool_usage"] for d in ds_infos)
+                        ds_max_busy   = max(d["T_busy"]        for d in ds_infos)
+                        tm_sat        = saturation_rates.get(tm_id, 0.0)
+                        sat_vals      = sorted(saturation_rates.values())
+                        median_sat    = statistics.median(sat_vals) if sat_vals else 0.0
+
+                        condA = ds_max_inpool > 0.5
+                        condC = T_bp > T_busy * 2.0
+                        condD = out_pool > 1.0 and tm_sat > median_sat
+
+                        is_victim = (condA  or condC) and not condD
+
+                        if condD:
+                            explicit_set.append((sid, "NETWORK_BOTTLENECK", out_pool))
+                            print(f"  [1b NETWORK] {sid}: outPool={out_pool:.2f}（>1.0借floating），"
+                                  f"TM sat={tm_sat:.1%}>中位數{median_sat:.1%}，"
+                                  f"TM網路積壓造成 bp，非受害者")
+                            continue
+                        elif is_victim:
                             info["bottleneck_cause"] = "BACKPRESSURE_VICTIM"
                             print(f"  [1b VICTIM] {sid}: outPool={out_pool:.2f}，"
                                   f"下游 max_inPool={ds_max_inpool:.2f}/"
@@ -672,7 +693,17 @@ class FlinkPropose:
             dn_in   = sum(task_info[st]["observed_input_rate"]
                           for st in operator_groups.get(down_op, []) if st in task_info)
             if up_out > 0:
-                flow_ratios.append((down_op, dn_in / up_out))
+                ratio = dn_in / up_out
+                # flow_ratio > 5.0：輸出是輸入的 5 倍以上，幾乎確定是 Join 算子
+                # （多輸入 stream 合併後 numBytesIn 只計算一條，obs_out 是全部輸出）
+                # 或 Fan-out 算子的正常擴張（如 HOP Expand-5x）。
+                # 此類極端值會使 IQR low_fence 計算嚴重失真，直接跳過。
+                # 5.0 依據：HOP Expand-5x 擴張倍率為 5，超過此值語意上不是積壓。
+                if ratio > 5.0:
+                    print(f"  [2a SKIP] {up_op} → {down_op}: flow_ratio={ratio:.2f}>5.0，"
+                          f"疑似 Join/Fan-out，跳過")
+                else:
+                    flow_ratios.append((down_op, ratio))
             else:
                 print(f"  [2a SKIP] {up_op} → {down_op}: up_obs_out=0，跳過（Source 無 network output）")
 
@@ -1647,22 +1678,35 @@ class FlinkPropose:
             print(f"❌ 停止 Job 失敗: {e}")
             return None
 
+
     def submit_job_from_savepoint(self, savepoint_path):
         try:
+            # 構建 flink run 命令參數
             config = self.job_config
+            program_args_str = " ".join(config["program_args"])
+
+            # 構建完整的 docker exec 命令
             flink_cmd = (
                 f"export NEXMARK_CONF_DIR={config['nexmark_conf_dir']} && "
                 f"/opt/flink/bin/flink run "
-                f"-s {savepoint_path} -d "
+                f"-s {savepoint_path} "
+                f"-d "
                 f"-c {config['entry_class']} "
                 f"-p {config['parallelism']} "
                 f"{config['jar_path']} "
-                f"{' '.join(config['program_args'])}"
+                f"{program_args_str}"
             )
-            docker_cmd = ["docker", "exec", "-i", config["container"], "bash", "-c", flink_cmd]
+
+            docker_cmd = [
+                "docker", "exec", "-i", config["container"],
+                "bash", "-c", flink_cmd
+            ]
+
             print(f"🚀 從 Savepoint 重新提交 Job...")
             print(f"   執行命令: {' '.join(docker_cmd)}")
-            subprocess.Popen(docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            # 執行命令（增加超時時間到 60 秒，因為從 savepoint 恢復需要時間）
+            process = subprocess.Popen(docker_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
             print(f"🚀 已發送提交指令，正在確認 Job 狀態...")
             poll_start = time.time()
             while time.time() - poll_start < 60:
@@ -1671,10 +1715,22 @@ class FlinkPropose:
                     print(f"✅ 偵測到 Job 已進入 RUNNING 狀態 (耗時: {time.time() - poll_start:.1f}s)")
                     return running_jobs[0]
                 time.sleep(1)
-            return None
+
+            # 輪詢超時後檢查 process 是否報錯
+            stdout, stderr = process.communicate(timeout=5)
+            if process.returncode != 0:
+                print(f"❌ 命令執行失敗: {stderr}")
+                return None
+            return True  # Job 可能已提交成功但還沒偵測到 RUNNING
+
+        except subprocess.TimeoutExpired:
+            print(f"⚠️ 重新提交 Job 超時 (超過 60 秒)")
+            print(f"   💡 Job 可能已經成功提交，請檢查 Flink Web UI")
+            return True  # 即使超時也回傳 True，Job 可能已成功提交
         except Exception as e:
             print(f"❌ 提交失敗: {e}")
             return None
+
 
     def wait_for_job_termination(self, job_id, max_wait_sec=30):
         start_wait = time.perf_counter()
@@ -1701,12 +1757,46 @@ class FlinkPropose:
             print(f"❌ 寫入遷移計畫失敗: {e}")
             return False
 
+    def fetch_current_latency(self):
+        """
+        從 Prometheus 即時讀取當下的 total latency（ms）。
+        與 latency_monitor.py 使用相同的查詢式。
+        回傳 float，若查詢失敗回傳 None。
+        """
+        query = (
+            f'max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{self.job_name}"}})'
+            f' + '
+            f'max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{self.job_name}"}})'
+        )
+        try:
+            resp = requests.get(f"{self.base_url}/api/v1/query",
+                                params={'query': query}, timeout=5)
+            data = resp.json()
+            if data['status'] == 'success' and data['data']['result']:
+                return float(data['data']['result'][0]['value'][1])
+        except Exception as e:
+            print(f"⚠️ 讀取即時 latency 失敗: {e}")
+        return None
+
     def trigger_migration(self, migration_plan, job_id=None, auto_restart=True):
         current_time = time.time()
         if current_time - self.last_migration_time < self.migration_cooldown:
             remaining = self.migration_cooldown - (current_time - self.last_migration_time)
-            print(f"⏳ 遷移冷卻中，剩餘 {remaining:.0f} 秒")
+            print(f"⏳ 遷移冷卻中，剩餘 {remaining:.0f} 秒（瓶頸已偵測，等冷卻結束後視 latency 決定是否遷移）")
             return False
+
+        # 冷卻期結束，檢查當下 latency 是否超過門檻
+        if self.migration_latency_threshold > 0:
+            current_latency = self.fetch_current_latency()
+            if current_latency is None:
+                print(f"⚠️ 無法讀取即時 latency，放棄本次遷移")
+                return False
+            if current_latency < self.migration_latency_threshold:
+                print(f"✅ 當下 latency={current_latency:.0f} ms < 門檻 {self.migration_latency_threshold} ms，"
+                      f"瓶頸已緩解，不觸發遷移")
+                return False
+            print(f"🔴 當下 latency={current_latency:.0f} ms ≥ 門檻 {self.migration_latency_threshold} ms，"
+                  f"確認需要遷移")
 
         if not self.write_migration_plan(migration_plan):
             return False
@@ -1716,6 +1806,15 @@ class FlinkPropose:
             if not running_jobs:
                 return False
             job_id = running_jobs[0]
+
+        try:
+            resp = requests.get(f"{self.flink_rest_url}/jobs/{job_id}")
+            current_state = resp.json().get('state', '')
+            if current_state != 'RUNNING':
+                print(f"⚠️ Job {job_id} 狀態為 {current_state}，跳過遷移")
+                return False
+        except Exception as e:
+            print(f"⚠️ 無法確認 job 狀態: {e}")
 
         migration_ts  = time.time()
         current_locs  = self.get_subtask_locations()
@@ -1784,6 +1883,24 @@ class FlinkPropose:
         out_pool_map = self.query_metric_by_task('flink_taskmanager_job_task_buffers_outPoolUsage')
         subtask_locations = self.get_subtask_locations()
 
+        # ── 初始配置備份（只執行一次）──
+        # 此時 Flink 已完成原生 Subtask 分配，migration_plan.json 尚未被 propose 修改。
+        # get_subtask_locations() 回傳的 key/value 格式與 migration_plan.json 相同：
+        #   key  : task_name_subtask_index（例如 Window_Max____Map_0）
+        #   value: tm_id（例如 tm_20c_1）
+        if (self.initial_placement_path
+                and not self._initial_placement_saved
+                and subtask_locations):
+            try:
+                os.makedirs(os.path.dirname(self.initial_placement_path), exist_ok=True)
+                with open(self.initial_placement_path, 'w') as _f:
+                    json.dump(subtask_locations, _f, indent=2, ensure_ascii=False)
+                self._initial_placement_saved = True
+                print(f"[initial_placement] ✅ 初始配置已備份 → {self.initial_placement_path}")
+                print(f"[initial_placement]    共 {len(subtask_locations)} 個 subtask")
+            except Exception as _e:
+                print(f"[initial_placement] ⚠️ 備份失敗: {_e}")
+
         if not busy_map:
             print("⚠️ 無法取得監控數據")
             return
@@ -1823,6 +1940,7 @@ class FlinkPropose:
                       f"{out_pool_map.get(task_name,{}).get(idx,0.0):>{col_w[6]}.3f}"
                       f"{subtask_locations.get(subtask_id,'unknown'):>{col_w[7]}}")
         print("=" * sum(col_w) + "\n")
+
 
     def auto_detect_and_migrate(self):
         """

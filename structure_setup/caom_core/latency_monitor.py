@@ -1,31 +1,54 @@
 import requests
 import time
 import csv
+import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
+# === Query 對應表 ===
+QUERY_JOB_MAP = {
+    "q4": "Nexmark_Q4_Isolated__Benchmark_Driver_",
+    "q5": "Nexmark_Q5_Isolated__Migration_Test_",
+    "q7": "Nexmark_Q7_Isolated__Benchmark_Driver_",
+}
+
+# === 解析命令列參數 ===
+def parse_args():
+    parser = argparse.ArgumentParser(description="Flink Latency Monitor")
+    parser.add_argument(
+        "--query", "-q",
+        required=True,
+        choices=QUERY_JOB_MAP.keys(),
+        help="實驗 Query 名稱，例如: q4, q5, q7"
+    )
+    parser.add_argument(
+        "--id", "-i",
+        required=True,
+        help="實驗 ID，用於輸出資料夾命名，例如: t16_2"
+    )
+    parser.add_argument(
+        "--output-dir", "-o",
+        default=None,
+        help="指定輸出目錄（覆蓋預設的 BASE_OUTPUT_DIR/id 路徑）。"
+             "實驗腳本用此參數把 CSV 寫到 results/ 下的正確位置。"
+    )
+    return parser.parse_args()
+
 # === 設定區 ===
 PROM_URL = "http://localhost:9090"
-#JOB_NAME = "Nexmark_Q7_Isolated__Benchmark_Driver_"
-JOB_NAME = "Nexmark_Q5_Isolated__Migration_Test_"
-#JOB_NAME = "Nexmark_Q4_Isolated__Benchmark_Driver_"
-# TODO: 每次實驗結果放入不同資料夾
-OUTPUT_FILE = "/home/yenwei/research/structure_setup/output/t17_4"
-OUTPUT_CSV = "/home/yenwei/research/structure_setup/output/t17_4/latency_data.csv"
 SAMPLE_INTERVAL = 2
+BASE_OUTPUT_DIR = "/home/yenwei/research/structure_setup/output"
 
-QUERY_TOTAL_LATENCY = f"""
-  max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{JOB_NAME}"}})
-  +
-  max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{JOB_NAME}"}})
-"""
+def build_queries(job_name):
+    query_total_latency = f"""
+      max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{job_name}"}})
+      +
+      max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{job_name}"}})
+    """
+    throughput_q = f'sum(flink_taskmanager_job_task_numRecordsOutPerSecond{{job_name="{job_name}", task_name=~".*Source.*"}})'
+    return query_total_latency, throughput_q
 
-# QUERY_TOTAL_LATENCY = f'max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{JOB_NAME}"}}) '
-#Inner_latency = f'max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{JOB_NAME}"}})'
-THROUGHPUT_Q = f'sum(flink_taskmanager_job_task_numRecordsOutPerSecond{{job_name="{JOB_NAME}", task_name=~".*Source.*"}})'
-
-# TODO : throughput 到底是看輸入還是輸出 因為資料會放大 輸出會變成20倍
 def fetch_metric(query):
     try:
         response = requests.get(f"{PROM_URL}/api/v1/query", params={'query': query}, timeout=5)
@@ -36,32 +59,31 @@ def fetch_metric(query):
         print(f"查詢錯誤: {e}")
     return None
 
-def monitor():
-    print(f"開始監控 Job: {JOB_NAME}")
-    print(f"數據將存儲至: {OUTPUT_FILE}")
+def monitor(job_name, output_file, output_csv):
+    query_total_latency, throughput_q = build_queries(job_name)
 
-    # 確保輸出目錄存在
-    os.makedirs(OUTPUT_FILE, exist_ok=True)
-    file_exists = os.path.isfile(OUTPUT_CSV)
+    print(f"開始監控 Job: {job_name}")
+    print(f"數據將存儲至: {output_file}")
+
+    os.makedirs(output_file, exist_ok=True)
+    file_exists = os.path.isfile(output_csv)
     start_time = time.time()
 
-    with open(OUTPUT_CSV, 'a', newline='') as f:
+    with open(output_csv, 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(['timestamp', 'unix_timestamp', 'relative_time', 'total_latency_ms', 'throughput'])
 
         try:
             while True:
-                val = fetch_metric(QUERY_TOTAL_LATENCY)
-                throughput = fetch_metric(THROUGHPUT_Q)
+                val = fetch_metric(query_total_latency)
+                throughput = fetch_metric(throughput_q)
 
-                # 💡 修正點：若 throughput 為 None 則預設為 0.0，避免 print 報錯
                 display_throughput = throughput if throughput is not None else 0.0
 
                 if val is not None:
                     current_unix = time.time()
                     elapsed = int(current_unix - start_time)
-                    # 紀錄數據
                     writer.writerow([time.strftime("%H:%M:%S"), current_unix, elapsed, val, display_throughput])
                     f.flush()
                     print(f"[{time.strftime('%H:%M:%S')}] Time: {elapsed}s | Total Latency: {val:.2f} ms | Throughput: {display_throughput:.2f} records/s")
@@ -71,15 +93,15 @@ def monitor():
                 time.sleep(SAMPLE_INTERVAL)
         except KeyboardInterrupt:
             print("\n監控停止，準備繪圖...")
-            plot_results()
+            plot_results(output_file, output_csv)
 
-def plot_results():
-    if not os.path.exists(OUTPUT_CSV) or os.stat(OUTPUT_CSV).st_size == 0:
+def plot_results(output_file, output_csv):
+    if not os.path.exists(output_csv) or os.stat(output_csv).st_size == 0:
         print("❌ CSV 檔案不存在或為空，無法繪圖。")
         return
 
     try:
-        df = pd.read_csv(OUTPUT_CSV)
+        df = pd.read_csv(output_csv)
 
         # --- 圖表 1: Latency 延遲圖 ---
         plt.figure(figsize=(10, 6))
@@ -89,8 +111,8 @@ def plot_results():
         plt.title('Total Latency Variation (Including Migration Cost)', fontsize=14)
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.legend()
-        plt.savefig(os.path.join(OUTPUT_FILE, 'experiment_latency_plot.png'))
-        print(f"✅ 延遲圖表已生成: {os.path.join(OUTPUT_FILE, 'experiment_latency_plot.png')}")
+        plt.savefig(os.path.join(output_file, 'experiment_latency_plot.png'))
+        print(f"✅ 延遲圖表已生成: {os.path.join(output_file, 'experiment_latency_plot.png')}")
 
         # --- 圖表 2: Throughput 吞吐量圖 ---
         plt.figure(figsize=(10, 6))
@@ -100,11 +122,27 @@ def plot_results():
         plt.title('Throughput Performance During Migration', fontsize=14)
         plt.grid(True, linestyle='--', alpha=0.6)
         plt.legend()
-        plt.savefig(os.path.join(OUTPUT_FILE, 'experiment_throughput_plot.png'))
-        print(f"✅ 吞吐量圖表已生成: {os.path.join(OUTPUT_FILE, 'experiment_throughput_plot.png')}")
+        plt.savefig(os.path.join(output_file, 'experiment_throughput_plot.png'))
+        print(f"✅ 吞吐量圖表已生成: {os.path.join(output_file, 'experiment_throughput_plot.png')}")
 
     except Exception as e:
         print(f"❌ 繪圖過程中發生錯誤: {e}")
 
 if __name__ == "__main__":
-    monitor()
+    args = parse_args()
+
+    # 根據參數動態決定 JOB_NAME 與輸出路徑
+    JOB_NAME = QUERY_JOB_MAP[args.query.lower()]
+
+    # --output-dir 優先；未指定時沿用原本的 BASE_OUTPUT_DIR/id 行為
+    if args.output_dir:
+        OUTPUT_FILE = args.output_dir
+    else:
+        OUTPUT_FILE = os.path.join(BASE_OUTPUT_DIR, args.id)
+    OUTPUT_CSV = os.path.join(OUTPUT_FILE, "latency_data.csv")
+
+    print(f"✅ Query: {args.query.upper()} → Job: {JOB_NAME}")
+    print(f"✅ 輸出路徑: {OUTPUT_FILE}")
+    print(f"✅ CSV 路徑: {OUTPUT_CSV}")
+
+    monitor(JOB_NAME, OUTPUT_FILE, OUTPUT_CSV)

@@ -903,12 +903,7 @@ class FlinkDetector:
             print(f"   執行命令: {' '.join(docker_cmd)}")
 
             # 執行命令（增加超時時間到 60 秒，因為從 savepoint 恢復需要時間）
-            process = subprocess.Popen(
-                docker_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
+            process = subprocess.Popen(docker_cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
 
             print(f"🚀 已發送提交指令，正在確認 Job 狀態...")
 
@@ -930,7 +925,6 @@ class FlinkDetector:
             if process.returncode != 0:
                 print(f"❌ 命令執行失敗: {stderr}")
                 return None
-
             return True
 
         except Exception as e:

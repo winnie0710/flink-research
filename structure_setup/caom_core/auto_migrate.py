@@ -9,7 +9,7 @@ import os
 import time
 import argparse
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from baseline_v2 import FlinkDetector
+from baseline_v3 import FlinkDetector
 
 def main():
     parser = argparse.ArgumentParser(description="CAOM Baseline Auto Migration")
@@ -43,7 +43,7 @@ def main():
     print(f"   - 遷移計畫路徑: {detector.migration_plan_path}")
     print(f"   - Savepoint 目錄: {detector.savepoint_dir}")
     print("\n開始監控...\n")
-    time.sleep(20)
+    #time.sleep(20)
 
     try:
         while True:

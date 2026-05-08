@@ -1,0 +1,1 @@
+first_trigger_time=17:25:00  latency=40226.0  phase=baseline

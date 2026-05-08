@@ -1,0 +1,1 @@
+first_trigger_time=16:28:22  latency=41851.0  phase=propose

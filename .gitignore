@@ -82,6 +82,7 @@ structure_setup/venv/
 structure_setup/source/
 structure_setup/save/
 structure_setup/output/
+structure_setup/results/
 # 忽略 IDE 設定
 .idea/
 

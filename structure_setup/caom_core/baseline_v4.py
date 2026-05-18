@@ -7,6 +7,7 @@ import csv
 import os
 import subprocess
 import re
+import math
 
 def format_bytes(bytes_value):
     if bytes_value == 0:
@@ -81,9 +82,17 @@ class FlinkDetector:
         self.migration_plan_path = migration_plan_path
         self.savepoint_dir = savepoint_dir
         self.last_migration_time = 0
-        self.migration_cooldown = 180  # 冷卻時間 3 分鐘，避免頻繁重啟
+        self.migration_cooldown = 300  # 冷卻時間 5 分鐘，避免頻繁重啟
         self._bottleneck_subtasks = []  # CAOM detection results
         self._task_info = {}  # Task information from CAOM detection
+
+        # --- CAOM Section III-C: Optimized Migration Start Time ---
+        self._source_rate_history = []       # 歷史 Source 實際資料產生率 (records/s)
+        self._history_max_len = 300          # 最多保留 300 筆（對應論文預測集大小 C 的上限）
+        self._pending_migration_plan = None  # 已備妥、等待最佳時機觸發的遷移計畫
+        self._migration_scheduled = False    # 是否已進入「等待最佳時間」排程狀態
+        self._migration_ready_time = None    # 進入排程狀態的時刻 (time.time())
+        self._migration_wait_timeout = 120   # 最長等待秒數，超過即強制執行遷移
 
         cfg = JOB_CONFIG[query_type]
         self.query_type = query_type
@@ -369,7 +378,226 @@ class FlinkDetector:
         subtask_locations = self.get_subtask_locations()
         self._write_log(task_info, subtask_locations)
 
+        # CAOM Section III-C: 記錄本輪 Source 實際產生率至歷史序列
+        self._record_source_rate(task_info)
+
         return report_list
+
+    # =========================================================================
+    # CAOM Section III-C: Optimized Operator Migration Start Time
+    # =========================================================================
+
+    def _record_source_rate(self, task_info):
+        """
+        從 task_info 取出所有 Source subtask 的 actual_input_rate 加總，
+        記錄至歷史序列 _source_rate_history。
+        對應論文：Source 的 actual rate 已在 detect_bottleneck() Step A 以
+        公式 (10)(11) 計算完畢，此處只負責彙整存入時間序列。
+        """
+        source_rates = []
+        for subtask_id, info in task_info.items():
+            if "source" in info.get("task_name", "").lower():
+                source_rates.append(info.get("actual_input_rate", 0.0))
+
+        if source_rates:
+            total_source_rate = sum(source_rates)
+            self._source_rate_history.append(total_source_rate)
+            if len(self._source_rate_history) > self._history_max_len:
+                self._source_rate_history.pop(0)
+            print(f"📈 [CAOM-Timing] Source 實際產生率已記錄: "
+                  f"{total_source_rate:.1f} rec/s "
+                  f"(歷史筆數: {len(self._source_rate_history)}/{self._history_max_len})")
+
+    def _predict_source_rates(self, horizon_sec, sample_interval_sec):
+        """
+        用指數平滑（含線性趨勢修正）預測未來 horizon_sec 秒的 Source 資料產生率。
+
+        history 中每一筆代表 sample_interval_sec 秒的觀測平均值；
+        輸出序列以「秒」為單位（長度 = horizon_sec），方便後續以秒為粒度搜尋。
+        趨勢斜率換算成「每秒變化量」，不受 sample_interval_sec 大小影響。
+
+        對應論文 Section III-C：採用混合時間序列方法（exponential smoothing +
+        趨勢項）預測 D_k。若環境已安裝 statsmodels，可替換為 Holt-Winters
+        或 ARIMA 以獲得更高精度；此處實作不依賴額外套件，適合冷啟動場景。
+
+        回傳: list[float]，長度為 horizon_sec（每個元素對應 1 秒的預測產生率）
+        """
+        history = self._source_rate_history
+        n_hist = len(history)
+
+        if n_hist < 5:
+            # 歷史資料不足：以最近觀測值填充（論文冷啟動處理）
+            last_val = history[-1] if history else 0.0
+            return [last_val] * horizon_sec
+
+        # ── 指數平滑（alpha = 0.3，偏向歷史穩定值）──────────────────────────
+        alpha = 0.3
+        smoothed = history[0]
+        for val in history[1:]:
+            smoothed = alpha * val + (1.0 - alpha) * smoothed
+
+        # ── 線性趨勢：換算成「每秒」斜率，消除 sample_interval_sec 的影響 ──
+        # 每筆 history 代表 sample_interval_sec 秒，所以 n 筆跨越 n*interval 秒
+        trend_window = min(10, n_hist)
+        recent = history[-trend_window:]
+        total_sec = max((trend_window - 1) * sample_interval_sec, 1)
+        trend_per_sec = (recent[-1] - recent[0]) / total_sec
+
+        # ── 逐秒預測：趨勢隨秒數指數衰減，避免長期外推失真 ─────────────────
+        predictions = []
+        base = smoothed
+        for sec in range(horizon_sec):
+            base = base + trend_per_sec * (0.9 ** sec)
+            predictions.append(max(0.0, base))
+
+        return predictions
+
+    def _estimate_migration_duration(self):
+        """
+        估算遷移持續時間 T_Ω（秒）。
+
+        對應論文公式 (3)：
+          T_Ω = max_i(serialize_i) + max_i(deserialize_i)
+                + 2 * Σ Ser(S_i) / B0
+                + σ(S_total)
+
+        此處以「state size → 網路傳輸時間」為主要項，
+        序列化/反序列化與對齊開銷以固定經驗值代替，
+        適用於無法在線上精確量測各項的場景。
+        """
+        NETWORK_BW_BYTES_PER_SEC = 6.25 * 1024 * 1024  # B0: 50 Mbps = 6.25 MB/s
+        SERIALIZE_OVERHEAD_SEC   = 2.0                  # max(serialize) + max(deserialize) 合計
+        ALIGNMENT_OVERHEAD_SEC   = 1.0                  # σ(S_total)：state 一致性對齊開銷
+
+        # 累加所有瓶頸 subtask 的 state size（bytes）
+        total_state_bytes = 0
+        if self._bottleneck_subtasks and self._task_info:
+            for subtask_id, _, _ in self._bottleneck_subtasks:
+                total_state_bytes += self._task_info.get(subtask_id, {}).get("state_size", 0)
+
+        if total_state_bytes > 0:
+            # 2 * Σ Ser(S_i) / B0：上傳 + 下載各一次
+            transfer_sec = (2.0 * total_state_bytes) / NETWORK_BW_BYTES_PER_SEC
+            estimated = SERIALIZE_OVERHEAD_SEC + transfer_sec + ALIGNMENT_OVERHEAD_SEC
+        else:
+            # 無 state 資訊時退回保守估計
+            estimated = SERIALIZE_OVERHEAD_SEC + ALIGNMENT_OVERHEAD_SEC
+
+        # 至少 3 秒，避免低估導致在高峰期開始遷移
+        result = max(3.0, estimated)
+        print(f"⏱️  [CAOM-Timing] 遷移時間估算: {result:.1f}s "
+              f"(state={format_bytes(total_state_bytes)}, "
+              f"transfer={total_state_bytes / NETWORK_BW_BYTES_PER_SEC * 2:.1f}s)")
+        return result
+
+    def _find_optimal_migration_start(self, migration_duration_sec, monitor_interval_sec):
+        """
+        以「秒」為搜尋單位，在預測窗口內找最佳遷移起始時間。
+
+        搜尋步長固定為 SEARCH_STEP_SEC 秒（與 monitor_interval_sec 無關），
+        使決策粒度不受監控週期長短影響，可精確對準資料率谷底。
+
+        對應論文 Section III-C 公式 (8) 與 Theorem 1：
+          min Σ_{k=s}^{e} D_{S,k}   (s.t. e = s + T_Ω)
+
+        其中第二項積壓量（公式 5）：
+          Σ_{k<s} max(0, D_{S,k} - Δ)
+        代表等待期間超過任務消費能力而積壓的資料量。
+
+        參數:
+          migration_duration_sec : 遷移持續的估算秒數（= T_Ω）
+          monitor_interval_sec   : 歷史資料的取樣週期（秒），只影響預測精度，
+                                   不影響搜尋步長
+
+        回傳: (best_sec, best_cost, immediate_cost)
+          best_sec      : 最佳起始秒數（0 = 立即遷移）
+          best_cost     : 最佳起始時間的遷移成本（records 累積量）
+          immediate_cost: 立即遷移（sec=0）的成本（作為基準）
+        """
+        SEARCH_STEP_SEC = 5   # 搜尋步長：每次往後 5 秒，粒度精細又不過度計算
+
+        if len(self._source_rate_history) < 5:
+            return 0, float('inf'), float('inf')
+
+        # 預測窗口：至少覆蓋 3 倍遷移時長，最少 120 秒
+        # 對應 Theorem 1：C 需大於 (T_x1 + 1)(1 + (Δ-λmin)/(λmax-Δ))^2
+        horizon_sec = max(int(migration_duration_sec * 3), 120)
+        predicted_rates = self._predict_source_rates(horizon_sec, monitor_interval_sec)
+
+        # Δ：任務在非瓶頸狀態下的最大資料消費率（records/s）
+        # 用所有 subtask max_capacity 的最小值作為整個管線的消費瓶頸
+        delta = 0.0
+        if self._task_info:
+            caps = [info.get("max_capacity", 0.0)
+                    for info in self._task_info.values()
+                    if info.get("max_capacity", 0.0) > 0]
+            delta = min(caps) if caps else 0.0
+
+        dur = int(migration_duration_sec)
+
+        def compute_cost(start_sec):
+            """
+            計算在 start_sec 秒後開始遷移的總成本 L_i（公式 5）。
+            第一項：遷移期間 [start, start+dur] 累積的 Source 產生量
+            第二項：等待期間 [0, start) 超出消費能力的積壓量
+            """
+            end_sec = min(start_sec + dur, len(predicted_rates) - 1)
+            migration_data = sum(predicted_rates[start_sec:end_sec + 1])
+            pre_backlog    = sum(max(0.0, r - delta)
+                                 for r in predicted_rates[:start_sec])
+            return migration_data + pre_backlog
+
+        # 立即遷移（sec=0）的成本作為基準
+        immediate_cost = compute_cost(0)
+
+        # 線性搜尋最佳起始秒（對應論文的 fundamental search algorithm）
+        best_sec  = 0
+        best_cost = immediate_cost
+        searchable_end = len(predicted_rates) - dur
+
+        for start_sec in range(SEARCH_STEP_SEC, max(searchable_end, 1), SEARCH_STEP_SEC):
+            cost = compute_cost(start_sec)
+            if cost < best_cost:
+                best_cost = cost
+                best_sec  = start_sec
+
+        print(f"🔍 [CAOM-Timing] 最佳起始搜尋結果:")
+        print(f"   預測窗口    : {horizon_sec}s，搜尋步長 {SEARCH_STEP_SEC}s")
+        print(f"   Δ (消費率) : {delta:.1f} rec/s")
+        print(f"   立即遷移成本: {immediate_cost:.1f} records")
+        print(f"   最佳起始時間: +{best_sec}s")
+        print(f"   最佳遷移成本: {best_cost:.1f} records")
+
+        return best_sec, best_cost, immediate_cost
+
+    def _log_timing_decision(self, best_sec, best_cost, immediate_cost,
+                             improvement_ratio, decision, monitor_interval_sec):
+        """
+        將 CAOM 時間選擇決策記錄至 detail_log CSV，方便實驗分析。
+        best_sec 直接是秒數（非步數），不需要再乘以 monitor_interval_sec。
+        """
+        try:
+            detail_exists = os.path.isfile(self.detail_log)
+            with open(self.detail_log, "a", newline="") as f:
+                writer = csv.writer(f)
+                if not detail_exists:
+                    writer.writerow(["timestamp", "decision_step", "subtask_id",
+                                     "priority_rank", "from_tm", "to_tm", "decision_reason"])
+                writer.writerow([
+                    time.time(),
+                    "TimingDecision",
+                    "ALL_BOTTLENECKS",
+                    "",
+                    "",
+                    "",
+                    (f"CAOM_TIMING: decision={decision}, "
+                     f"best_sec={best_sec}s, "
+                     f"immediate_cost={immediate_cost:.1f}, "
+                     f"best_cost={best_cost:.1f}, "
+                     f"improvement={improvement_ratio * 100:.1f}%")
+                ])
+        except Exception as e:
+            print(f"⚠️ 時間決策記錄失敗: {e}")
 
     def _write_log(self, task_info, subtask_locations):
         """將本輪所有 subtask 狀態寫入 metrics CSV log。"""
@@ -511,8 +739,11 @@ class FlinkDetector:
         try:
             response = requests.get(f"{self.flink_rest_url}/jobs/{job_id}/checkpoints", timeout=5)
             data = response.json()
-            if 'latest' in data and 'completed' in data['latest']:
-                checkpoint_id = data['latest']['completed'].get('id')
+            # Flink returns "completed": null when no checkpoint has finished yet.
+            # Use .get() chain to avoid AttributeError on the null value.
+            completed = data.get('latest', {}).get('completed')
+            if completed is not None:
+                checkpoint_id = completed.get('id')
                 if checkpoint_id:
                     print(f"✅ 找到最新 Checkpoint ID: {checkpoint_id}")
                     return checkpoint_id
@@ -811,6 +1042,41 @@ class FlinkDetector:
         # [Fix Bug 4] tm_net_tracker 使用 bytes/s，與 net_demand（bytes/s）同單位
         tm_net_tracker = {rid: network_usage.get(rid, 0.0) for rid in tm_info.keys()}
 
+        # ── Backpressure-aware traffic inflation ──────────────────────────────
+        # Under heavy backpressure, Prometheus traffic metrics collapse to near-zero,
+        # causing bandwidth validation to underestimate actual load after restart.
+        # Inflate by min(1/(1-avg_bp), 5.0) when avg_bp > 0.6.
+        if hasattr(self, '_task_info') and self._task_info:
+            bp_vals = [info.get('T_bp', 0.0) for info in self._task_info.values()]
+            avg_bp = sum(bp_vals) / len(bp_vals) if bp_vals else 0.0
+        else:
+            avg_bp = 0.0
+        bp_mult = min(1.0 / max(1.0 - avg_bp, 0.01), 5.0) if avg_bp > 0.6 else 1.0
+        if bp_mult > 1.0:
+            print(f"\n⚠️ 系統反壓 avg_bp={avg_bp:.2%}，流量估算倍率 ×{bp_mult:.2f}")
+            for rid in tm_net_tracker:
+                tm_net_tracker[rid] *= bp_mult
+
+        # ── Hard operator count limit for narrow-BW TMs ───────────────────────
+        # Window_Join (Q7) needs ~12 MB/s/subtask; Window_Auction_Count (Q5)
+        # needs ~32 MB/s/subtask. Narrow TMs (≤20 MB/s) cannot safely host >1
+        # Window_Join or any Window_Auction_Count subtask.
+        NARROW_BW_THRESHOLD = int(20 * 1024 * 1024)
+        HEAVY_OP_LIMITS = {"Window_Join": 1, "Window_Auction_Count": 0}
+        narrow_tms = {rid for rid, cap in network_capacity_map.items()
+                      if cap <= NARROW_BW_THRESHOLD}
+        heavy_op_count = {rid: 0 for rid in tm_info}
+        if hasattr(self, '_task_info'):
+            bottleneck_ids = {c['subtask_id'] for c in migration_candidates}
+            for sid, loc_rid in current_locations.items():
+                if sid in bottleneck_ids or loc_rid not in heavy_op_count:
+                    continue
+                task_nm = self._task_info.get(sid, {}).get('task_name', '')
+                for kw in HEAVY_OP_LIMITS:
+                    if kw in task_nm:
+                        heavy_op_count[loc_rid] += 1
+                        break
+
         # ── [Fix pre-deduct → lazy deduct] ────────────────────────────────────
         # 廢除 pre-deduct（統一提前扣除）。
         # 原 pre-deduct 問題：把所有瓶頸 subtask 的負載從源 TM 統一扣除後，
@@ -830,10 +1096,15 @@ class FlinkDetector:
                 continue
 
             subtask_cpu_load = candidate['cpu_demand']       # ms/s
-            subtask_net_bytes = candidate['net_demand']      # bytes/s（已是正確單位）
+            # 乘以 bp_mult 補償反壓期間 Prometheus 指標崩塌導致的嚴重低估
+            subtask_net_bytes = candidate['net_demand'] * bp_mult   # bytes/s
 
             best_node = None
             best_congestion_ratio = float('inf')
+
+            task_nm_wasp = ''
+            if hasattr(self, '_task_info') and candidate['subtask_id'] in self._task_info:
+                task_nm_wasp = self._task_info[candidate['subtask_id']].get('task_name', '')
 
             for rid, info in tm_info.items():
                 # ── WASP hard constraint 1: available computing slots ──────
@@ -844,6 +1115,16 @@ class FlinkDetector:
                 # [Fix Bug 4] subtask_net_bytes 已是 bytes/s，與 net_cap 同單位，直接比較
                 net_cap = network_capacity_map.get(rid, int(37.5 * 1024 * 1024))
                 if (tm_net_tracker[rid] + subtask_net_bytes) > WASP_ALPHA * net_cap:
+                    continue
+
+                # ── WASP hard constraint 3: heavy operator count on narrow TMs ──
+                heavy_blocked = False
+                for kw, max_cnt in HEAVY_OP_LIMITS.items():
+                    if kw in task_nm_wasp and rid in narrow_tms:
+                        if heavy_op_count.get(rid, 0) >= max_cnt:
+                            heavy_blocked = True
+                            break
+                if heavy_blocked:
                     continue
 
                 # ── Amnis objective: argmin(C_v / O_v) ───────────────────
@@ -874,6 +1155,11 @@ class FlinkDetector:
                     slot_occupancy[current_resource_id] = max(0, slot_occupancy[current_resource_id] - 1)
                     tm_load_tracker[current_resource_id] -= subtask_cpu_load
                     tm_net_tracker[current_resource_id] -= subtask_net_bytes
+                # Update heavy_op_count for the destination TM
+                for kw in HEAVY_OP_LIMITS:
+                    if kw in task_nm_wasp:
+                        heavy_op_count[best_node] = heavy_op_count.get(best_node, 0) + 1
+                        break
 
                 if hasattr(self, '_task_info') and subtask_id in self._task_info:
                     info = self._task_info[subtask_id]
@@ -1089,6 +1375,83 @@ class FlinkDetector:
             return None
 
 
+    def _wait_for_slots_freed(self, expected_slots: int, timeout: int = 30) -> bool:
+        """
+        [FIX-9] 等待全叢集 freeSlots 總數達到預期值。
+
+        設計依據：
+          Flink 的 Job 狀態到達 CANCELED/FINISHED 的時間點，
+          早於各 TM 實際將 Slot 從 ALLOCATED 改回 FREE 的時間點。
+          若立刻呼叫 flink run，JobManager 在 Slot offer 視窗內
+          看不到足夠的 freeSlots，會跳過未回報的 TM（尤其弱節點）。
+
+        判斷依據（/taskmanagers REST API）：
+          total_free = Σ tm.freeSlots（所有 TM）
+          expected_slots = 本次停止 Job 所持有的 Slot 總數（= parallelism）
+
+        回傳：
+          True  = freeSlots 已達預期（安全重啟）
+          False = 超時（繼續執行但有風險，呼叫端負責記錄警告）
+        """
+        print(f"⏳ [FIX-9] 等待叢集 freeSlots 回到 {expected_slots} 個（超時 {timeout}s）...")
+        deadline = time.time() + timeout
+        last_free = -1
+        while time.time() < deadline:
+            try:
+                resp = requests.get(f"{self.flink_rest_url}/taskmanagers", timeout=5)
+                tms = resp.json().get("taskmanagers", [])
+                total_free = sum(tm.get("freeSlots", 0) for tm in tms)
+                if total_free != last_free:
+                    print(f"   freeSlots={total_free} / {expected_slots}")
+                    last_free = total_free
+                if total_free >= expected_slots:
+                    print(f"✅ [FIX-9] freeSlots 已達 {total_free}，Slot 釋放完成")
+                    return True
+            except Exception as e:
+                print(f"   ⚠️ 查詢 /taskmanagers 失敗: {e}")
+            time.sleep(1)
+        print(f"⚠️ [FIX-9] 等待 Slot 釋放超時（{timeout}s），freeSlots={last_free}，強制繼續")
+        return False
+
+    def _wait_for_all_tms_have_free_slot(self, timeout: int = 20) -> bool:
+        """
+        [FIX-9] 確認每一個已知 TM 都回報至少 1 個 freeSlot。
+
+        設計依據：
+          _wait_for_slots_freed 確認總量夠了，但仍可能有某個弱節點
+          的 freeSlots 還是 0（例如 tm_20c_5 單核且剛才 CPU 飽和，
+          JVM GC 導致回應延遲）。
+          JobManager 送出 slot request 後，若某 TM 在 offer 視窗內
+          沒有回報 freeSlot，就會被完全跳過，導致該 TM 上的
+          Subtask 沒有位置可以啟動，Job 啟動失敗。
+
+        回傳：
+          True  = 所有 TM 都有 freeSlot
+          False = 超時（有 TM 沒有回報 freeSlot，呼叫端負責記錄警告）
+        """
+        print(f"⏳ [FIX-9] 確認每個 TM 都有 freeSlot（超時 {timeout}s）...")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                resp = requests.get(f"{self.flink_rest_url}/taskmanagers", timeout=5)
+                tms = resp.json().get("taskmanagers", [])
+                if not tms:
+                    time.sleep(1)
+                    continue
+                not_ready = [
+                    (tm.get("id", "?"), tm.get("freeSlots", 0))
+                    for tm in tms if tm.get("freeSlots", 0) == 0
+                ]
+                if not not_ready:
+                    print(f"✅ [FIX-9] 所有 {len(tms)} 個 TM 均有 freeSlot，可以安全重啟")
+                    return True
+                print(f"   等待 TM freeSlot: 尚未就緒={[tm_id for tm_id, _ in not_ready]}")
+            except Exception as e:
+                print(f"   ⚠️ 查詢 /taskmanagers 失敗: {e}")
+            time.sleep(1)
+        print(f"⚠️ [FIX-9] 等待所有 TM 就緒超時（{timeout}s），強制繼續（有風險）")
+        return False
+
     # 在 FlinkDetector 類別中新增一個輔助方法來檢查 Job 是否已消失 移除硬編碼的 time.sleep(5)
     def wait_for_job_termination(self, job_id, max_wait_sec=30):
         """輪詢 REST API 確保 Job 已經不在 RUNNING 狀態，釋放資源"""
@@ -1148,6 +1511,23 @@ class FlinkDetector:
         print("⏳ 動態檢查資源釋放情況...")
         self.wait_for_job_termination(job_id)
         wait_end = time.perf_counter()
+
+        # ── [FIX-9] 確認所有 TM Slot 實際釋放後再重啟 ──────────────────────
+        # wait_for_job_termination 只確認 Job 狀態機到達終態，
+        # 但 TM Slot 釋放是非同步的，弱節點（單核 TM）在高負載後
+        # 可能因 JVM GC 導致 Slot 回報延遲，被 JobManager 跳過。
+        _parallelism = self.job_config.get("parallelism", 4)
+        slots_ok = self._wait_for_slots_freed(
+            expected_slots=_parallelism,
+            timeout=30
+        )
+        if not slots_ok:
+            print("⚠️ [FIX-9] Slot 釋放等待超時，仍繼續（可能有部分 TM 未就緒）")
+
+        all_tms_ok = self._wait_for_all_tms_have_free_slot(timeout=20)
+        if not all_tms_ok:
+            print("⚠️ [FIX-9] 有 TM 未回報 freeSlot，仍繼續（有 Subtask 落點失敗風險）")
+        # ── [FIX-9] END ─────────────────────────────────────────────────────
 
         # 3. 重新啟動 Job
         restart_start = time.perf_counter()
@@ -1219,21 +1599,71 @@ class FlinkDetector:
             return True
         return False
 
-    def auto_detect_and_migrate(self, busy_threshold=None, skew_threshold=None):
+    def auto_detect_and_migrate(self, busy_threshold=None, skew_threshold=None,
+                                monitor_interval_sec=5):
         """
-        Automatically detect bottlenecks using CAOM algorithm and trigger migration
-        Uses backpressure recovery to identify true bottlenecks in a single pass
+        CAOM 完整自動偵測與遷移流程（含 Section III-C 最佳時間選擇）。
+
+        執行順序：
+          1. 若已有排程中的遷移計畫（_migration_scheduled=True），
+             重新評估是否已到達最佳時間窗口，到則執行，否則繼續等待。
+          2. 否則執行正常偵測（detect_bottleneck）。
+          3. 偵測到瓶頸後，評估最佳遷移起始時間：
+             - 歷史資料充足：計算立即遷移成本 vs 最佳時間成本
+               * 改善幅度 > IMPROVEMENT_THRESHOLD 且 best_sec > 0：排程延遲遷移
+               * 否則：立即遷移
+             - 歷史資料不足（冷啟動）：立即遷移
+
+        參數:
+          monitor_interval_sec : 主迴圈每輪的監控間隔（秒），決定歷史資料取樣粒度。
+                                 搜尋步長固定為 5 秒，與此值無關。
         """
-        # Run CAOM bottleneck detection
+        IMPROVEMENT_THRESHOLD = 0.05   # 最低改善門檻：5%，低於此不值得延遲等待
+        MIN_HISTORY_FOR_PREDICT = 10   # 至少需要這麼多筆歷史才啟動時間選擇
+
+        # ── 階段 1: 若已有排程中的計畫，檢查是否到達最佳時機 ─────────────────
+        if self._migration_scheduled and self._pending_migration_plan:
+            elapsed = time.time() - self._migration_ready_time
+            print(f"\n⏳ [CAOM-Timing] 已在排程等待中 ({elapsed:.0f}s / "
+                  f"max {self._migration_wait_timeout}s)")
+
+            # 重新估算目前最佳時間（每輪更新預測）
+            migration_duration_sec = self._estimate_migration_duration()
+            best_sec, best_cost, immediate_cost = self._find_optimal_migration_start(
+                migration_duration_sec, monitor_interval_sec
+            )
+
+            # 條件：best_sec == 0（現在是最佳時機）或已超過最長等待時間
+            if best_sec == 0 or elapsed >= self._migration_wait_timeout:
+                reason = ("到達最佳低負載時間窗口"
+                          if best_sec == 0
+                          else f"等待超時 ({elapsed:.0f}s ≥ {self._migration_wait_timeout}s)，強制執行")
+                print(f"🚀 [CAOM-Timing] {reason}，開始執行遷移！")
+                self._log_timing_decision(best_sec, best_cost, immediate_cost,
+                                          0.0, f"EXECUTE({reason})", monitor_interval_sec)
+                self._migration_scheduled    = False
+                plan = self._pending_migration_plan
+                self._pending_migration_plan = None
+                return self.trigger_migration(plan)
+            else:
+                print(f"   繼續等待，預計再等 {best_sec}s "
+                      f"(best_cost={best_cost:.1f} vs immediate={immediate_cost:.1f})")
+                return False
+
+        # ── 階段 2: 正常偵測流程 ──────────────────────────────────────────────
         reports = self.detect_bottleneck()
 
         if not reports:
             print("⚠️ 無法獲取監控數據")
             return False
 
-        # Check if any bottlenecks were detected
         if not hasattr(self, '_bottleneck_subtasks') or not self._bottleneck_subtasks:
             print("✅ 未檢測到瓶頸，系統運行正常")
+            # 瓶頸消失：取消任何排程中的遷移計畫（狀態重置）
+            if self._migration_scheduled:
+                print("ℹ️  [CAOM-Timing] 瓶頸已消失，取消排程中的遷移計畫")
+                self._migration_scheduled    = False
+                self._pending_migration_plan = None
             return False
 
         print("\n" + "=" * 100)
@@ -1243,24 +1673,21 @@ class FlinkDetector:
         print(f"\n🔥 CAOM 檢測到 {len(self._bottleneck_subtasks)} 個瓶頸 Subtask:")
         for subtask_id, actual_rate, max_capacity in self._bottleneck_subtasks:
             overload_pct = ((actual_rate - max_capacity) / max_capacity * 100) if max_capacity > 0 else 0
-            print(f"   - {subtask_id}: 實際輸入 {actual_rate:.2f} rec/s > 最大容量 {max_capacity:.2f} rec/s (過載 {overload_pct:.1f}%)")
+            print(f"   - {subtask_id}: 實際輸入 {actual_rate:.2f} rec/s > "
+                  f"最大容量 {max_capacity:.2f} rec/s (過載 {overload_pct:.1f}%)")
 
-        # Generate migration plan (automatically uses CAOM detection results)
+        # ── 產生遷移計畫 ──────────────────────────────────────────────────────
         migration_plan = self.generate_migration_plan()
-
         if not migration_plan:
             return False
-
-        # Write migration plan to JSON
         if not self.write_migration_plan(migration_plan):
             return False
 
-        # ── 記錄決策過程至 migration_details CSV ───────────────────────────────
+        # ── 記錄決策過程至 migration_details CSV ─────────────────────────────
         detail_exists     = os.path.isfile(self.detail_log)
         event_time        = time.time()
         current_locations = self.get_subtask_locations()
 
-        # [Fix Bug 4] Rebuild Neptune interference scores using bytes/s for net_demand
         bytes_out_map = self.query_metric_by_task(
             'flink_taskmanager_job_task_numBytesOutPerSecond'
         )
@@ -1271,10 +1698,10 @@ class FlinkDetector:
             idx = info.get('subtask_index', 0)
             net_demand_bytes = bytes_out_map.get(task_name, {}).get(idx, 0.0)
             migration_candidates.append({
-                "subtask_id":          subtask_id,
-                "actual_rate":         actual_rate,
-                "cpu_demand":          info.get("T_busy", 0) * 1000,
-                "net_demand":          net_demand_bytes,   # bytes/s
+                "subtask_id":  subtask_id,
+                "actual_rate": actual_rate,
+                "cpu_demand":  info.get("T_busy", 0) * 1000,
+                "net_demand":  net_demand_bytes,
             })
         max_cpu = max((c["cpu_demand"] for c in migration_candidates), default=1.0) or 1.0
         max_net = max((c["net_demand"] for c in migration_candidates), default=1.0) or 1.0
@@ -1290,18 +1717,15 @@ class FlinkDetector:
             if not detail_exists:
                 writer.writerow(["timestamp", "decision_step", "subtask_id",
                                  "priority_rank", "from_tm", "to_tm", "decision_reason"])
-            # Diagnosis
             for subtask_id, actual_rate, max_cap in self._bottleneck_subtasks:
                 overload_pct = ((actual_rate - max_cap) / max_cap * 100) if max_cap > 0 else 0
                 writer.writerow([event_time, "Diagnosis", subtask_id, "",
                                  current_locations.get(subtask_id, "unknown"), "",
                                  f"CAOM_BOTTLENECK: actual={actual_rate:.1f} > cap={max_cap:.1f} ({overload_pct:.1f}% overload)"])
-            # Prioritization (Neptune interference score ranking)
             for rank, c in enumerate(migration_candidates, start=1):
                 writer.writerow([event_time, "Prioritization", c["subtask_id"], rank,
                                  current_locations.get(c["subtask_id"], "unknown"), "",
                                  f"Neptune_score={c['interference_score']:.4f} (Rank {rank}), net_demand_bytes={c['net_demand']:.1f}"])
-            # Assignment
             for subtask_id, target_tm in migration_plan.items():
                 original_tm = current_locations.get(subtask_id, "unknown")
                 if target_tm != original_tm:
@@ -1309,4 +1733,57 @@ class FlinkDetector:
                                      original_tm, target_tm,
                                      f"{target_tm} selected: WASP+Amnis argmin(C_v/O_v)"])
 
-        return self.trigger_migration(migration_plan)
+        # ── 階段 3: CAOM Section III-C 最佳遷移時間評估 ───────────────────────
+        print(f"\n{'='*60}")
+        print(f"📊 [CAOM Section III-C] 最佳遷移時間評估")
+        print(f"{'='*60}")
+
+        n_history = len(self._source_rate_history)
+        if n_history < MIN_HISTORY_FOR_PREDICT:
+            # 歷史資料不足（冷啟動）：立即遷移
+            print(f"   歷史資料不足 ({n_history}/{MIN_HISTORY_FOR_PREDICT} 筆)，"
+                  f"執行立即遷移（冷啟動）")
+            self._log_timing_decision(0, 0, 0, 0.0,
+                                      "IMMEDIATE_COLDSTART", monitor_interval_sec)
+            return self.trigger_migration(migration_plan)
+
+        migration_duration_sec = self._estimate_migration_duration()
+        best_sec, best_cost, immediate_cost = self._find_optimal_migration_start(
+            migration_duration_sec, monitor_interval_sec
+        )
+
+        # 改善幅度（相對於立即遷移）
+        if immediate_cost > 0:
+            improvement_ratio = (immediate_cost - best_cost) / immediate_cost
+        else:
+            improvement_ratio = 0.0
+
+        print(f"\n{'─'*60}")
+        print(f"   歷史資料筆數  : {n_history} 筆（取樣間隔 {monitor_interval_sec}s）")
+        print(f"   遷移預計耗時  : {migration_duration_sec:.1f}s")
+        print(f"   立即遷移成本  : {immediate_cost:.1f} records")
+        print(f"   最佳時間成本  : {best_cost:.1f} records (+{best_sec}s 後)")
+        print(f"   預期改善幅度  : {improvement_ratio * 100:.1f}% "
+              f"(門檻: {IMPROVEMENT_THRESHOLD * 100:.0f}%)")
+        print(f"{'─'*60}")
+
+        if best_sec > 0 and improvement_ratio > IMPROVEMENT_THRESHOLD:
+            # 延遲遷移：排程等待最佳時機
+            print(f"⏸️  [CAOM-Timing] 排程延遲遷移，等待 {best_sec}s 後的低負載窗口")
+            print(f"   預期節省: {immediate_cost - best_cost:.1f} records "
+                  f"({improvement_ratio * 100:.1f}%)")
+            self._log_timing_decision(best_sec, best_cost, immediate_cost,
+                                      improvement_ratio, "SCHEDULED_DELAY", monitor_interval_sec)
+            self._pending_migration_plan = migration_plan
+            self._migration_scheduled    = True
+            self._migration_ready_time   = time.time()
+            return False   # 本輪不執行遷移，等下一輪重入
+
+        else:
+            # 立即遷移：現在是最佳或改善幅度不顯著
+            reason = ("改善幅度不足" if improvement_ratio <= IMPROVEMENT_THRESHOLD
+                      else "現在即為最佳時機")
+            print(f"🚀 [CAOM-Timing] {reason}，立即執行遷移")
+            self._log_timing_decision(best_sec, best_cost, immediate_cost,
+                                      improvement_ratio, f"IMMEDIATE({reason})", monitor_interval_sec)
+            return self.trigger_migration(migration_plan)

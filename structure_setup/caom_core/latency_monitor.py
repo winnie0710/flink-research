@@ -37,17 +37,47 @@ def parse_args():
 
 # === 設定區 ===
 PROM_URL = "http://localhost:9090"
+FLINK_REST_URL = "http://localhost:8081"
 SAMPLE_INTERVAL = 2
 BASE_OUTPUT_DIR = "/home/yenwei/research/structure_setup/output"
 
-def build_queries(job_name):
-    query_total_latency = f"""
-      max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{job_name}"}})
-      +
-      max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{job_name}"}})
+
+def get_current_job_id():
     """
-    throughput_q = f'sum(flink_taskmanager_job_task_numRecordsOutPerSecond{{job_name="{job_name}", task_name=~".*Source.*"}})'
+    從 Flink REST API 取得目前唯一 RUNNING job 的 job_id。
+    不比對 job name：REST API 回傳的是原始名稱（含空格），
+    而 Prometheus label 是 sanitized 格式（空格→底線），兩者無法直接比對。
+    實驗環境同時只有一個 job 在跑，直接取第一個 RUNNING job 即可。
+    """
+    try:
+        resp = requests.get(f"{FLINK_REST_URL}/jobs", timeout=5)
+        for job in resp.json().get('jobs', []):
+            if job.get('status') == 'RUNNING':
+                return job['id']
+    except Exception as e:
+        print(f"⚠️ 無法取得 job_id: {e}")
+    return None
+
+
+def build_queries(job_name, job_id=None):
+    """
+    建立 Prometheus 查詢字串。
+    若有 job_id，加入 label filter 確保只查當前 job 的 metrics，
+    排除 Prometheus TSDB 中舊 job 殘留的 stale series（5 分鐘 staleness window）。
+    """
+    id_filter = f', job_id="{job_id}"' if job_id else ''
+
+    query_total_latency = f"""
+      max(flink_taskmanager_job_task_operator_currentEmitEventTimeLag{{job_name="{job_name}"{id_filter}}})
+      +
+      max(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_latency{{job_name="{job_name}"{id_filter}}})
+    """
+    throughput_q = (
+        f'sum(flink_taskmanager_job_task_numRecordsOutPerSecond'
+        f'{{job_name="{job_name}", task_name=~".*Source.*"{id_filter}}})'
+    )
     return query_total_latency, throughput_q
+
 
 def fetch_metric(query):
     try:
@@ -59,8 +89,45 @@ def fetch_metric(query):
         print(f"查詢錯誤: {e}")
     return None
 
+
+def fetch_latency_with_fallback(query_with_id, query_without_id):
+    """
+    latency 查詢：先用 job_id 過濾；若某些 metric 不含 job_id label 導致無資料，
+    才退回 job_name-only 查詢（latency 無資料時寫不了 CSV，fallback 可接受）。
+    """
+    result = fetch_metric(query_with_id)
+    if result is None and query_with_id != query_without_id:
+        result = fetch_metric(query_without_id)
+    return result
+
+
+def fetch_throughput_strict(query_with_id, query_without_id):
+    """
+    throughput 查詢：
+    - 若有 job_id → 只用 job_id 版，無資料回傳 0（新 job 剛啟動尚未 scrape，正確值就是 0）
+      不可 fallback：fallback 會拿到舊 job 的 stale 高值，反而污染資料
+    - 若無 job_id（get_current_job_id 失敗）→ 退回 job_name-only，接受 stale 風險
+    """
+    if query_with_id != query_without_id:
+        # 有 job_id filter：無資料 = 新 job 尚未有 metrics，視為 0
+        result = fetch_metric(query_with_id)
+        return result if result is not None else 0.0
+    else:
+        # 無 job_id：只能用 job_name，接受 stale 風險
+        return fetch_metric(query_without_id)
+
+
 def monitor(job_name, output_file, output_csv):
-    query_total_latency, throughput_q = build_queries(job_name)
+    # 取得當前 job_id，用於 Prometheus 查詢過濾
+    job_id = get_current_job_id()
+    if job_id:
+        print(f"✅ 目前 Job ID: {job_id}（Prometheus 查詢將加入 job_id 過濾）")
+    else:
+        print("⚠️ 無法取得 job_id，Prometheus 查詢將僅用 job_name 過濾")
+        print("   （可能有舊 job stale metrics 污染，staleness window = 5 分鐘）")
+
+    query_latency_with_id, throughput_with_id = build_queries(job_name, job_id)
+    query_latency_no_id,  throughput_no_id  = build_queries(job_name, None)
 
     print(f"開始監控 Job: {job_name}")
     print(f"數據將存儲至: {output_file}")
@@ -69,6 +136,10 @@ def monitor(job_name, output_file, output_csv):
     file_exists = os.path.isfile(output_csv)
     start_time = time.time()
 
+    # 偵測遷移後 job 重啟：throughput 連續為 0 但 latency 有值 → job_id 可能已換
+    zero_tp_streak = 0
+    ZERO_TP_REFRESH_THRESHOLD = 5  # 連續 5 次（10 秒）throughput=0 且有 latency → 刷新 job_id
+
     with open(output_csv, 'a', newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -76,10 +147,23 @@ def monitor(job_name, output_file, output_csv):
 
         try:
             while True:
-                val = fetch_metric(query_total_latency)
-                throughput = fetch_metric(throughput_q)
+                val = fetch_latency_with_fallback(query_latency_with_id, query_latency_no_id)
+                throughput = fetch_throughput_strict(throughput_with_id, throughput_no_id)
 
                 display_throughput = throughput if throughput is not None else 0.0
+
+                # 偵測 job 重啟（遷移後新 job_id）：throughput 連續 0 但 latency 仍有值
+                if display_throughput == 0.0 and val is not None and job_id is not None:
+                    zero_tp_streak += 1
+                    if zero_tp_streak >= ZERO_TP_REFRESH_THRESHOLD:
+                        new_id = get_current_job_id()
+                        if new_id and new_id != job_id:
+                            job_id = new_id
+                            query_latency_with_id, throughput_with_id = build_queries(job_name, job_id)
+                            print(f"🔄 偵測到 Job 重啟，更新 Job ID: {job_id}")
+                        zero_tp_streak = 0
+                else:
+                    zero_tp_streak = 0
 
                 if val is not None:
                     current_unix = time.time()
